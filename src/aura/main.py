@@ -8,6 +8,15 @@ import signal
 import sys
 import tempfile
 
+# Under pythonw.exe sys.stdout and sys.stderr are None.  Redirect both to
+# devnull before the first third-party import — PySide6 and python-dotenv
+# both write to stderr during initialisation, which crashes with AttributeError
+# or OSError before _setup_logging() is ever called.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 

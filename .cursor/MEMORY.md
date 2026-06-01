@@ -81,6 +81,15 @@ aura-app/
 
 ## Completed (continued)
 
+- 2026-06-01 Сесія 11: Critical Fix v0.5.2 — Modifier Latching + Context Menu Leak + pythonw Crash:
+  - `injector.py`: private `_user32_inj = ctypes.WinDLL("user32")`; `_MODIFIER_VKS` with per-entry `(vk, is_extended)` flag; `_release_modifiers()` sends `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for extended VK codes (VK_RCONTROL, VK_RMENU, VK_APPS) BEFORE pynput secondary layer; `Key.space` removed from `_MODIFIER_KEYS`
+  - `hotkey.py`: `_hook_callback` refactored with `should_swallow` flag set BEFORE signal emitter calls — trigger key always consumed even if state machine raises (context menu leak fix)
+  - `main.py`: `sys.stdout`/`sys.stderr` → devnull guard moved to module level before first third-party import (PySide6, python-dotenv write to stderr during import)
+  - 11 regression tests added (7 `_hook_callback` + 4 Win32 modifier release)
+  - 86/86 tests, 88.68% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
 - 2026-06-01 Сесія 10: Post-Deploy Critical Fix v0.5.1 — ctypes Hook Crash + Silent Autostart + CI Platform:
   - `hotkey.py`: `ctypes.windll.user32/kernel32` → private `ctypes.WinDLL("user32"/"kernel32")` instances; explicit `.argtypes`/`.restype` for all 9 Win32 functions (`SetWindowsHookExW`, `CallNextHookEx`, `UnhookWindowsHookEx`, `GetMessageW`, `TranslateMessage`, `DispatchMessageW`, `PostThreadMessageW`, `GetCurrentThreadId`, `GetLastError`); `_HOOKPROC` return type → `c_long` (mypy-safe LRESULT substitute); `argtypes[1]` references same `_HOOKPROC` type object used to create `proc` → ctypes type-identity check passes
   - `install_autostart.py`: `Path(__file__).parent.resolve()` → `Path(__file__).resolve().parent`; pythonw path built with `.resolve()` — guaranteed fully-resolved absolute path to `.venv/Scripts/pythonw.exe`

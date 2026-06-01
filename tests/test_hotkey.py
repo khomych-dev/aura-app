@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import ctypes
+import sys
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 import aura.config as _config
-from aura.hotkey import _VK_MAP, HotkeyListener, _resolve_trigger_vk  # noqa: I001
+from aura.hotkey import (  # noqa: I001
+    _VK_MAP,
+    LLKHF_INJECTED,
+    WM_KEYDOWN,
+    WM_KEYUP,
+    HotkeyListener,
+    _resolve_trigger_vk,
+)
+
+if sys.platform == "win32":
+    from aura.hotkey import _KBDLLHOOKSTRUCT  # type: ignore[attr-defined]
 
 
 @pytest.fixture()
@@ -255,3 +267,97 @@ def test_stop_joins_hook_thread(listener: HotkeyListener) -> None:
     mock_thread.join.assert_called_once()
     assert listener._hook_thread is None
     assert listener._thread_id == 0
+
+
+# ------------------------------------------------------------------
+# _hook_callback — should_swallow regression (Bug 2 fix)
+# Windows-only: requires _KBDLLHOOKSTRUCT ctypes structure.
+# ------------------------------------------------------------------
+
+
+def _make_kbd_struct(vk: int, injected: bool = False) -> ctypes.Structure:
+    """Build a fake KBDLLHOOKSTRUCT for direct _hook_callback testing."""
+    kbd = _KBDLLHOOKSTRUCT()
+    kbd.vkCode = vk
+    kbd.flags = LLKHF_INJECTED if injected else 0
+    return kbd
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_swallows_trigger_keydown_normally(
+    listener: HotkeyListener,
+) -> None:
+    kbd = _make_kbd_struct(listener._trigger_vk)
+    result = listener._hook_callback(0, WM_KEYDOWN, ctypes.addressof(kbd))
+    assert result == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_swallows_trigger_keyup_normally(
+    listener: HotkeyListener,
+) -> None:
+    listener._held = True
+    listener._recording = True
+    kbd = _make_kbd_struct(listener._trigger_vk)
+    result = listener._hook_callback(0, WM_KEYUP, ctypes.addressof(kbd))
+    assert result == 1
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_swallows_trigger_keydown_even_when_state_machine_raises(
+    listener: HotkeyListener,
+) -> None:
+    """Regression: should_swallow is set BEFORE _on_trigger_down(), so a raised
+    exception in the state machine can never let the OS see the trigger key."""
+    kbd = _make_kbd_struct(listener._trigger_vk)
+    with patch.object(listener, "_on_trigger_down", side_effect=RuntimeError("boom")):
+        result = listener._hook_callback(0, WM_KEYDOWN, ctypes.addressof(kbd))
+    assert result == 1, "trigger KEYDOWN must be swallowed even if state machine raises"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_swallows_trigger_keyup_even_when_state_machine_raises(
+    listener: HotkeyListener,
+) -> None:
+    """Regression: should_swallow is set BEFORE _on_trigger_up(), so a raised
+    exception (e.g. logger.exception failing with sys.stderr=None) never causes
+    CallNextHookEx to be reached — closing the context-menu leak."""
+    listener._held = True
+    listener._recording = True
+    kbd = _make_kbd_struct(listener._trigger_vk)
+    with patch.object(listener, "_on_trigger_up", side_effect=RuntimeError("boom")):
+        result = listener._hook_callback(0, WM_KEYUP, ctypes.addressof(kbd))
+    assert result == 1, "trigger KEYUP must be swallowed even if state machine raises"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_forwards_non_trigger_key(listener: HotkeyListener) -> None:
+    kbd = _make_kbd_struct(0x41)  # 'A' key — not the trigger
+    with patch("aura.hotkey._user32") as mock_u32:
+        mock_u32.CallNextHookEx.return_value = 0
+        listener._hook_callback(0, WM_KEYDOWN, ctypes.addressof(kbd))
+    mock_u32.CallNextHookEx.assert_called_once()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_forwards_injected_trigger_event(
+    listener: HotkeyListener,
+) -> None:
+    """LLKHF_INJECTED events from TextInjector must pass through unchanged."""
+    kbd = _make_kbd_struct(listener._trigger_vk, injected=True)
+    with patch("aura.hotkey._user32") as mock_u32:
+        mock_u32.CallNextHookEx.return_value = 0
+        listener._hook_callback(0, WM_KEYDOWN, ctypes.addressof(kbd))
+    mock_u32.CallNextHookEx.assert_called_once()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="WH_KEYBOARD_LL structs are Win32-only")
+def test_hook_callback_forwards_when_ncode_negative(
+    listener: HotkeyListener,
+) -> None:
+    """n_code < 0 means the hook MUST call CallNextHookEx per MSDN contract."""
+    kbd = _make_kbd_struct(listener._trigger_vk)
+    with patch("aura.hotkey._user32") as mock_u32:
+        mock_u32.CallNextHookEx.return_value = 0
+        listener._hook_callback(-1, WM_KEYDOWN, ctypes.addressof(kbd))
+    mock_u32.CallNextHookEx.assert_called_once()

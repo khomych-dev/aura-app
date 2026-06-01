@@ -4,12 +4,13 @@
 
 ## Task
 
-**Aura v0.5.1 — Post-Deploy Critical Fix: ctypes Hook Crash + Silent Autostart + CI Platform**
+**Aura v0.5.2 — Critical Fix: Modifier Latching + Context Menu Leak + pythonw Crash + CI Runner**
 
-Three critical failures confirmed after v0.5.0 deploy:
-1. `ctypes.ArgumentError` crash in keyboard hook — `.argtypes`/`.restype` not defined on Win32 functions
-2. Terminal window still visible on boot — autostart shortcut not targeting `pythonw.exe` directly via absolute path
-3. GitHub Actions CI failure — workflow running on Linux runner; `pywin32` has no Linux wheel
+Four confirmed production bugs:
+1. **Phantom Shortcuts** — OS shortcut keys (Ctrl+V, Ctrl+Z, etc.) fire during dictated text injection because trigger modifier keys are logically stuck "down" at OS level when `keyboard.Controller().type()` is called.
+2. **Context Menu Leak** — `WH_KEYBOARD_LL` hook does not return `1` for `WM_KEYUP` / `WM_SYSKEYUP` of the trigger key (`VK_APPS`, 0x5D), so the OS opens a context menu on key release.
+3. **pythonw.exe Crash** — `sys.stdout` / `sys.stderr` are `None` under `pythonw.exe`; third-party libraries (or logging) hit `AttributeError` / `OSError` on write attempts.
+4. **GitHub Actions CI Runner** — pipeline still fails if any job/step runs on a non-Windows runner; all jobs must use `runs-on: windows-latest`.
 
 ## Type
 
@@ -21,87 +22,88 @@ Done
 
 ## Agent Chain
 
-- [x] Developer — done (hotkey.py ctypes isolation, install_autostart.py path hardening, ci.yml windows-latest)
-- [x] QA — APPROVED (75/75, 86.49% coverage, ruff clean, mypy clean; one mypy blocker found and fixed: ctypes.wintypes.LRESULT → ctypes.c_long)
+- [x] Developer — done (main.py devnull guard, hotkey.py should_swallow, injector.py Win32 keybd_event+EXTENDEDKEY)
+- [x] QA — APPROVED (86/86 tests, 88.68% coverage, ruff clean, mypy clean; 11 regression tests added)
 
 ## Spec / Decisions
 
 ---
 
-### Bug 1 — ctypes.ArgumentError in SetWindowsHookExW
+### Bug 1 — Phantom Shortcuts (Modifier Latching)
 
-**Symptom:**
-```
-hook = _user32.SetWindowsHookExW(WH_KEYBOARD_LL, proc, None, 0)
-ctypes.ArgumentError: argument 2: TypeError: expected WinFunctionType instance instead of WinFunctionType
-```
+**Symptom:** After the trigger key is pressed and dictated text is injected, the OS fires spurious shortcuts (Ctrl+V, Ctrl+Z, etc.) as if Ctrl/Alt/Shift/Menu are still held.
 
-**Root cause:** `SetWindowsHookExW` (and `CallNextHookEx`, `UnhookWindowsHookEx`) have no explicit `.argtypes` / `.restype` declared. Without these, ctypes cannot distinguish between two `WINFUNCTYPE`-derived types created in different scopes or import paths — type identity check fails even when the signatures are identical.
+**Root cause:** Physical trigger key (Menu / Right Ctrl) or its associated modifiers remain logically "down" at the OS level at the moment `keyboard.Controller().type()` executes.
 
 **Fix requirements:**
-- Explicitly declare `.argtypes` and `.restype` for `SetWindowsHookExW`, `CallNextHookEx`, and `UnhookWindowsHookEx`.
-- Define the callback type (`HOOKPROC`) as:
-  `ctypes.WINFUNCTYPE(c_int, c_int, c_int, ctypes.POINTER(c_void_p))`
-  (or the exact strict ctypes equivalents mapping to LRESULT, int, WPARAM, LPARAM).
-- The `proc` instance passed to `SetWindowsHookExW` MUST be created from this same exact type definition.
+- Before ANY call to `keyboard.Controller().type()`, send explicit `KeyUp` events for all modifier keys: **Ctrl (left + right), Alt (left + right), Shift (left + right), and Menu** (VK_APPS).
+- The release sequence must be complete and unconditional — not conditional on "is key held" — to handle edge cases where the OS state and Python state diverge.
+- This must happen strictly BEFORE the `.type()` call, with no code between the releases and the type call that could re-latch a modifier.
 
 ---
 
-### Bug 2 — Terminal Still Visible on Autostart
+### Bug 2 — Context Menu Leak (WH_KEYBOARD_LL)
 
-**Symptom:** Autostart still opens a console window on boot.
+**Symptom:** A Windows context menu appears at the cursor position when the trigger key (Menu key / VK_APPS) is released.
 
-**Root cause:** The shortcut's `TargetPath` is not set to the absolute path of `pythonw.exe` inside the project's `.venv/Scripts/` directory — it may still be using `uv run`, `python.exe`, or a relative path that resolves to a console-backed interpreter.
+**Root cause:** The low-level keyboard hook (`WH_KEYBOARD_LL`) returns `1` (swallows) only for `WM_KEYDOWN` / `WM_SYSKEYDOWN` of the trigger key, but NOT for `WM_KEYUP` / `WM_SYSKEYUP`. The OS sees the unswallowed `KeyUp` and opens the context menu.
 
 **Fix requirements:**
-- The script that creates the Windows startup shortcut (`.lnk`) must dynamically resolve the **absolute path** to `pythonw.exe` located inside the project's `.venv/Scripts/` directory.
-- This absolute path MUST be set as the shortcut's `TargetPath`.
-- Must NOT use `uv run`, `python.exe`, or any wrapper that spawns a console window.
+- The hook callback MUST return `1` for **both** `WM_KEYDOWN` (`0x100`) and `WM_SYSKEYDOWN` (`0x104`) **AND** `WM_KEYUP` (`0x101`) and `WM_SYSKEYUP` (`0x105`) when the key is the configured trigger VK.
+- All other keys (non-trigger) must still be forwarded via `CallNextHookEx` as before.
 
 ---
 
-### Bug 3 — GitHub Actions CI Failure (Linux Runner)
+### Bug 3 — pythonw.exe Crash (None stdout/stderr)
 
-**Symptom:**
-```
-error: Distribution pywin32==311 ... can't be installed because it doesn't have a source
-distribution or wheel for the current platform
-hint: You're on Linux...
-```
+**Symptom:** App crashes silently immediately on startup when launched via `pythonw.exe` (headless / no console).
 
-**Root cause:** The GitHub Actions workflow YAML is configured with a Linux/Ubuntu runner. `pywin32` (and other Windows-only deps) have no Linux wheels.
+**Root cause:** Under `pythonw.exe`, `sys.stdout` and `sys.stderr` are `None`. Any logging `StreamHandler` or third-party library that writes to them will raise `AttributeError` or `OSError`.
 
 **Fix requirements:**
-- Update the workflow YAML to use `runs-on: windows-latest` (or equivalent Windows runner).
-- All steps (install, lint, test) must execute on Windows.
+- At the very start of the application entry point (before ANY logging setup or library imports that may write to stdout/stderr), check if `sys.stdout is None` or `sys.stderr is None`.
+- If `None`, redirect them to `open(os.devnull, "w")` (or a rotating log file) so all subsequent writes are safely absorbed.
+- This guard must be the **first executable code** in the entry point module.
+
+---
+
+### Bug 4 — GitHub Actions CI Runner
+
+**Symptom:** CI pipeline fails on jobs that run on Linux/Ubuntu runners because Windows-only packages (e.g. `pywin32`) have no Linux wheels.
+
+**Fix requirements:**
+- In ALL `.github/workflows/*.yml` files, every `runs-on:` value (for every job and every step matrix) must be set to `windows-latest`.
+- No job may run on `ubuntu-latest`, `ubuntu-*`, `macos-*`, or any other non-Windows runner.
+- Verify that no Linux-specific setup steps (apt-get, etc.) remain after this change.
 
 ---
 
 ## Developer Notes
 
-### Bug 1 — hotkey.py (ctypes crash)
-- Root cause confirmed: `ctypes.windll.user32` is a process-global shared singleton. `pynput` (still imported transitively via `injector.py`) sets `.argtypes` on the shared `user32.SetWindowsHookExW` with its own `WINFUNCTYPE` type. Our `_HOOKPROC` callback instance — created from a *different* `WINFUNCTYPE` type object — fails ctypes' type-identity check at call time.
-- Fix: replaced `ctypes.windll.user32/kernel32` with `ctypes.WinDLL("user32"/"kernel32")` (private, isolated instances). Added explicit `.argtypes` and `.restype` for all 9 Win32 functions called: `SetWindowsHookExW`, `CallNextHookEx`, `UnhookWindowsHookEx`, `GetMessageW`, `TranslateMessage`, `DispatchMessageW`, `PostThreadMessageW`, `GetCurrentThreadId`, `GetLastError`.
-- `_HOOKPROC` return type updated from `c_int` to `ctypes.wintypes.LRESULT` (correct LONG_PTR type for LRESULT on x64).
-- `argtypes[1]` of `SetWindowsHookExW` is the exact same `_HOOKPROC` type object → type-identity check now passes.
+### Bug 1 — injector.py (modifier latching / phantom shortcuts)
+- Root cause: `pynput.Controller.release()` omits `KEYEVENTF_EXTENDEDKEY` for extended VK codes. VK_RCONTROL (0xA3), VK_RMENU (0xA5), VK_APPS (0x5D) each require this flag so the OS clears the correct scan-code slot.
+- Fix: private `_user32_inj = ctypes.WinDLL("user32")` with explicit `keybd_event.argtypes`; `_MODIFIER_VKS` tuple with per-entry `(vk, is_extended)` flag; Win32 `keybd_event` pass runs BEFORE pynput releases.
+- `Key.space` removed from `_MODIFIER_KEYS` (not a modifier; was a remnant of the old Ctrl+Shift+Space hotkey).
+- Secondary pynput release layer retained — existing `test_paste_primary_releases_modifiers_before_typing` test continues to pass unchanged.
 
-### Bug 2 — install_autostart.py (terminal on autostart)
-- Changed `Path(__file__).parent.resolve()` → `Path(__file__).resolve().parent`: resolves symlinks in `__file__` itself before taking the parent, not after — guarantees the correct project root in all invocation scenarios.
-- Changed `pythonw = project_root / ".venv" / "Scripts" / "pythonw.exe"` → `.resolve()` call on the result: final `shortcut.TargetPath` is the fully-resolved absolute path to `pythonw.exe` with no symlinks or relative components.
+### Bug 2 — hotkey.py (context menu leak)
+- Root cause: `_hook_callback` called `_on_trigger_down()` / `_on_trigger_up()` INSIDE `try`, with `return 1` on the next line. If signal emission raised (e.g. because Bug 3's `sys.stderr is None` caused `logger.exception` to raise a secondary exception), the `except` swallowed it and fell through to `CallNextHookEx` — forwarding the trigger key to the OS.
+- Fix: `should_swallow = False` declared before the `try`; set to `True` BEFORE the signal emitter call; `if should_swallow: return 1` checked AFTER the `except` — so the key is always consumed even when the state-machine raises.
 
-### Bug 3 — ci.yml (Linux runner)
-- `runs-on: ubuntu-latest` → `runs-on: windows-latest`
-- Removed `apt-get` system-package install step (Linux-only; Windows runner has all needed Qt DLLs via PySide6 wheel)
-- `QT_QPA_PLATFORM: offscreen` retained (PySide6 offscreen platform works on Windows CI)
-- All other steps (uv, ruff, mypy, pytest, pip-audit) are cross-platform; no changes needed
+### Bug 3 — main.py (pythonw.exe crash)
+- Root cause: `sys.stdout is not None` guard was only in `_setup_logging()`. PySide6 and python-dotenv write to `sys.stderr` during their import phase — BEFORE `_setup_logging()` is called — causing `AttributeError`/`OSError` under `pythonw.exe`.
+- Fix: guard added at module level between stdlib imports and `from PySide6...` — all third-party imports now see valid stream objects.
+
+### Bug 4 — ci.yml (runner)
+- Already `runs-on: windows-latest` from v0.5.1 fix. No change required.
 
 ## Next Step
 
-QA to run full test suite, coverage, ruff, mypy and verify ctypes argtypes are correctly declared.
+QA to run full test suite, coverage, ruff, mypy and verify all three file changes.
 
 ## Skipped
 
-- Analyst — full root causes and fix requirements specified above
+- Analyst — full root causes and fix requirements specified in task
 - Architect — no architectural changes; targeted implementation fixes only
 - Security — no auth/payments/credentials changes
 - AI Safety — no LLM prompt changes

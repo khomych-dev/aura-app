@@ -275,6 +275,13 @@ class HotkeyListener(QObject):
     def _hook_callback(
         self, n_code: int, w_param: int, l_param: int
     ) -> int:
+        # Determine whether to swallow the event before any side-effectful work.
+        # should_swallow is set to True *before* the signal emitters are called so
+        # that if _on_trigger_down()/_on_trigger_up() raise (e.g. logger.exception
+        # fails because sys.stderr is None under pythonw.exe), the except clause
+        # still returns 1, preventing the OS from receiving the trigger key and
+        # opening the context menu or firing an app shortcut.
+        should_swallow = False
         if n_code >= 0:
             try:
                 kbd = ctypes.cast(
@@ -282,14 +289,15 @@ class HotkeyListener(QObject):
                 ).contents
                 if kbd.vkCode == self._trigger_vk and not (kbd.flags & LLKHF_INJECTED):
                     if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
+                        should_swallow = True
                         self._on_trigger_down()
-                        return 1  # consumed — do not deliver to other hooks or apps
-                    if w_param in (WM_KEYUP, WM_SYSKEYUP):
+                    elif w_param in (WM_KEYUP, WM_SYSKEYUP):
+                        should_swallow = True
                         self._on_trigger_up()
-                        return 1  # consumed
             except Exception:
                 logger.exception("Error in keyboard hook callback")
-
+        if should_swallow:
+            return 1
         return _user32.CallNextHookEx(self._hook_handle, n_code, w_param, l_param)
 
     # ------------------------------------------------------------------
