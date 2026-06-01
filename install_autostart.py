@@ -139,8 +139,11 @@ def main() -> None:
         print(f"ERROR: Startup folder not found: {startup_dir}")
         sys.exit(1)
 
-    project_root = Path(__file__).parent.resolve()
-    pythonw = project_root / ".venv" / "Scripts" / "pythonw.exe"
+    # resolve() on __file__ first so any symlink in the script path is followed
+    # before taking .parent — guarantees the true project root regardless of
+    # how the script was invoked.
+    project_root = Path(__file__).resolve().parent
+    pythonw = (project_root / ".venv" / "Scripts" / "pythonw.exe").resolve()
 
     if not pythonw.exists():
         print(

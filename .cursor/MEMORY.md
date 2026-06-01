@@ -81,6 +81,14 @@ aura-app/
 
 ## Completed (continued)
 
+- 2026-06-01 Сесія 10: Post-Deploy Critical Fix v0.5.1 — ctypes Hook Crash + Silent Autostart + CI Platform:
+  - `hotkey.py`: `ctypes.windll.user32/kernel32` → private `ctypes.WinDLL("user32"/"kernel32")` instances; explicit `.argtypes`/`.restype` for all 9 Win32 functions (`SetWindowsHookExW`, `CallNextHookEx`, `UnhookWindowsHookEx`, `GetMessageW`, `TranslateMessage`, `DispatchMessageW`, `PostThreadMessageW`, `GetCurrentThreadId`, `GetLastError`); `_HOOKPROC` return type → `c_long` (mypy-safe LRESULT substitute); `argtypes[1]` references same `_HOOKPROC` type object used to create `proc` → ctypes type-identity check passes
+  - `install_autostart.py`: `Path(__file__).parent.resolve()` → `Path(__file__).resolve().parent`; pythonw path built with `.resolve()` — guaranteed fully-resolved absolute path to `.venv/Scripts/pythonw.exe`
+  - `ci.yml`: `runs-on: ubuntu-latest` → `runs-on: windows-latest`; removed `apt-get` Linux step; Windows runner installs pywin32 and all Windows-only deps from their native wheels
+  - 75/75 tests, 86.49% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
 - 2026-05-30 Сесія 7: Silent Autostart Fix + Right Ctrl Hotkey (v0.3.0):
   - `install_autostart.py`: bypass uv entirely; shortcut targets `.venv/Scripts/pythonw.exe -m aura.main` directly — guaranteed no console window
   - `hotkey.py`: trigger → Right Ctrl only; key-repeat debounce via `if key in _held_keys: return` at top of `_on_press`; removed `_CTRL_KEYS`, `_SHIFT_KEYS`, `_ctrl_held()`, `_shift_held()`

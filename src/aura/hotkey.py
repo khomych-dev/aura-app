@@ -40,8 +40,15 @@ _VK_MAP: dict[str, int] = {
 # ---------------------------------------------------------------------------
 
 if sys.platform == "win32":  # pragma: no cover
-    _user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-    _kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    # Private WinDLL instances instead of ctypes.windll (shared process cache).
+    # ctypes.windll is global: any library (e.g. pynput) that calls
+    # SetWindowsHookExW can overwrite .argtypes on the shared object with its
+    # own WINFUNCTYPE type.  When our callback — created from a *different*
+    # WINFUNCTYPE type — is passed as argument 2, ctypes type-identity check
+    # fails with "expected WinFunctionType instance instead of WinFunctionType".
+    # Private instances are fully isolated so no external code can mutate them.
+    _user32 = ctypes.WinDLL("user32")    # type: ignore[attr-defined]
+    _kernel32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined]
 
     class _KBDLLHOOKSTRUCT(ctypes.Structure):
         _fields_ = [
@@ -52,12 +59,68 @@ if sys.platform == "win32":  # pragma: no cover
             ("dwExtraInfo", ctypes.c_size_t),   # ULONG_PTR
         ]
 
+    # The proc instance passed to SetWindowsHookExW MUST be created from this
+    # exact type object.  The argtypes entry for argument 2 references the same
+    # object so ctypes can enforce type identity rather than doing blind marshaling.
+    # c_long is used for LRESULT: mypy's ctypes stubs omit wintypes.LRESULT, and
+    # c_long is correct for our 0/1 return values (sign-extends safely on x64).
     _HOOKPROC = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
-        ctypes.c_int,
-        ctypes.c_int,
-        ctypes.wintypes.WPARAM,
-        ctypes.wintypes.LPARAM,
+        ctypes.c_long,              # LRESULT (LONG_PTR; 0/1 sign-extends correctly)
+        ctypes.c_int,               # nCode: int
+        ctypes.wintypes.WPARAM,     # wParam: WPARAM
+        ctypes.wintypes.LPARAM,     # lParam: LPARAM
     )
+
+    # Explicit argtypes / restype for every Win32 function this module calls.
+    # Without these ctypes uses default marshaling and cannot enforce the
+    # callback-type contract, leading to ArgumentError on conflicting shared state.
+    _user32.SetWindowsHookExW.restype = ctypes.wintypes.HANDLE
+    _user32.SetWindowsHookExW.argtypes = [
+        ctypes.c_int,                # idHook  (WH_KEYBOARD_LL = 13)
+        _HOOKPROC,                   # lpfn    (must be an instance of _HOOKPROC)
+        ctypes.wintypes.HINSTANCE,   # hMod    (NULL → global hook)
+        ctypes.wintypes.DWORD,       # dwThreadId (0 → all threads)
+    ]
+
+    _user32.CallNextHookEx.restype = ctypes.c_long  # LRESULT
+    _user32.CallNextHookEx.argtypes = [
+        ctypes.wintypes.HANDLE,      # hhk    (NULL is acceptable per MSDN)
+        ctypes.c_int,                # nCode
+        ctypes.wintypes.WPARAM,      # wParam
+        ctypes.wintypes.LPARAM,      # lParam
+    ]
+
+    _user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
+    _user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HANDLE]
+
+    _user32.GetMessageW.restype = ctypes.wintypes.BOOL
+    _user32.GetMessageW.argtypes = [
+        ctypes.POINTER(ctypes.wintypes.MSG),
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.UINT,
+        ctypes.wintypes.UINT,
+    ]
+
+    _user32.TranslateMessage.restype = ctypes.wintypes.BOOL
+    _user32.TranslateMessage.argtypes = [ctypes.POINTER(ctypes.wintypes.MSG)]
+
+    _user32.DispatchMessageW.restype = ctypes.c_long  # LRESULT
+    _user32.DispatchMessageW.argtypes = [ctypes.POINTER(ctypes.wintypes.MSG)]
+
+    _user32.PostThreadMessageW.restype = ctypes.wintypes.BOOL
+    _user32.PostThreadMessageW.argtypes = [
+        ctypes.wintypes.DWORD,       # idThread
+        ctypes.wintypes.UINT,        # Msg
+        ctypes.wintypes.WPARAM,      # wParam
+        ctypes.wintypes.LPARAM,      # lParam
+    ]
+
+    _kernel32.GetCurrentThreadId.restype = ctypes.wintypes.DWORD
+    _kernel32.GetCurrentThreadId.argtypes = []
+
+    _kernel32.GetLastError.restype = ctypes.wintypes.DWORD
+    _kernel32.GetLastError.argtypes = []
+
 else:
     _user32 = None   # type: ignore[assignment]
     _kernel32 = None  # type: ignore[assignment]
