@@ -29,10 +29,10 @@ LLKHF_INJECTED: int = 0x10
 # Extend this table to support additional trigger key choices.
 _VK_MAP: dict[str, int] = {
     "ctrl_r": 0xA3,  # VK_RCONTROL
-    "menu":   0x5D,  # VK_APPS (Application / Context-Menu key)
-    "f13":    0x7C,  # VK_F13
-    "f14":    0x7D,  # VK_F14
-    "f15":    0x7E,  # VK_F15
+    "menu": 0x5D,  # VK_APPS (Application / Context-Menu key)
+    "f13": 0x7C,  # VK_F13
+    "f14": 0x7D,  # VK_F14
+    "f15": 0x7E,  # VK_F15
 }
 
 # ---------------------------------------------------------------------------
@@ -47,16 +47,16 @@ if sys.platform == "win32":  # pragma: no cover
     # WINFUNCTYPE type — is passed as argument 2, ctypes type-identity check
     # fails with "expected WinFunctionType instance instead of WinFunctionType".
     # Private instances are fully isolated so no external code can mutate them.
-    _user32 = ctypes.WinDLL("user32")    # type: ignore[attr-defined]
+    _user32 = ctypes.WinDLL("user32")  # type: ignore[attr-defined]
     _kernel32 = ctypes.WinDLL("kernel32")  # type: ignore[attr-defined]
 
     class _KBDLLHOOKSTRUCT(ctypes.Structure):
         _fields_ = [
-            ("vkCode",      ctypes.wintypes.DWORD),
-            ("scanCode",    ctypes.wintypes.DWORD),
-            ("flags",       ctypes.wintypes.DWORD),
-            ("time",        ctypes.wintypes.DWORD),
-            ("dwExtraInfo", ctypes.c_size_t),   # ULONG_PTR
+            ("vkCode", ctypes.wintypes.DWORD),
+            ("scanCode", ctypes.wintypes.DWORD),
+            ("flags", ctypes.wintypes.DWORD),
+            ("time", ctypes.wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_size_t),  # ULONG_PTR
         ]
 
     # The proc instance passed to SetWindowsHookExW MUST be created from this
@@ -65,10 +65,10 @@ if sys.platform == "win32":  # pragma: no cover
     # c_long is used for LRESULT: mypy's ctypes stubs omit wintypes.LRESULT, and
     # c_long is correct for our 0/1 return values (sign-extends safely on x64).
     _HOOKPROC = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined]
-        ctypes.c_long,              # LRESULT (LONG_PTR; 0/1 sign-extends correctly)
-        ctypes.c_int,               # nCode: int
-        ctypes.wintypes.WPARAM,     # wParam: WPARAM
-        ctypes.wintypes.LPARAM,     # lParam: LPARAM
+        ctypes.c_long,  # LRESULT (LONG_PTR; 0/1 sign-extends correctly)
+        ctypes.c_int,  # nCode: int
+        ctypes.wintypes.WPARAM,  # wParam: WPARAM
+        ctypes.wintypes.LPARAM,  # lParam: LPARAM
     )
 
     # Explicit argtypes / restype for every Win32 function this module calls.
@@ -76,18 +76,18 @@ if sys.platform == "win32":  # pragma: no cover
     # callback-type contract, leading to ArgumentError on conflicting shared state.
     _user32.SetWindowsHookExW.restype = ctypes.wintypes.HANDLE
     _user32.SetWindowsHookExW.argtypes = [
-        ctypes.c_int,                # idHook  (WH_KEYBOARD_LL = 13)
-        _HOOKPROC,                   # lpfn    (must be an instance of _HOOKPROC)
-        ctypes.wintypes.HINSTANCE,   # hMod    (NULL → global hook)
-        ctypes.wintypes.DWORD,       # dwThreadId (0 → all threads)
+        ctypes.c_int,  # idHook  (WH_KEYBOARD_LL = 13)
+        _HOOKPROC,  # lpfn    (must be an instance of _HOOKPROC)
+        ctypes.wintypes.HINSTANCE,  # hMod    (NULL → global hook)
+        ctypes.wintypes.DWORD,  # dwThreadId (0 → all threads)
     ]
 
     _user32.CallNextHookEx.restype = ctypes.c_long  # LRESULT
     _user32.CallNextHookEx.argtypes = [
-        ctypes.wintypes.HANDLE,      # hhk    (NULL is acceptable per MSDN)
-        ctypes.c_int,                # nCode
-        ctypes.wintypes.WPARAM,      # wParam
-        ctypes.wintypes.LPARAM,      # lParam
+        ctypes.wintypes.HANDLE,  # hhk    (NULL is acceptable per MSDN)
+        ctypes.c_int,  # nCode
+        ctypes.wintypes.WPARAM,  # wParam
+        ctypes.wintypes.LPARAM,  # lParam
     ]
 
     _user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
@@ -109,10 +109,10 @@ if sys.platform == "win32":  # pragma: no cover
 
     _user32.PostThreadMessageW.restype = ctypes.wintypes.BOOL
     _user32.PostThreadMessageW.argtypes = [
-        ctypes.wintypes.DWORD,       # idThread
-        ctypes.wintypes.UINT,        # Msg
-        ctypes.wintypes.WPARAM,      # wParam
-        ctypes.wintypes.LPARAM,      # lParam
+        ctypes.wintypes.DWORD,  # idThread
+        ctypes.wintypes.UINT,  # Msg
+        ctypes.wintypes.WPARAM,  # wParam
+        ctypes.wintypes.LPARAM,  # lParam
     ]
 
     _kernel32.GetCurrentThreadId.restype = ctypes.wintypes.DWORD
@@ -122,7 +122,7 @@ if sys.platform == "win32":  # pragma: no cover
     _kernel32.GetLastError.argtypes = []
 
 else:
-    _user32 = None   # type: ignore[assignment]
+    _user32 = None  # type: ignore[assignment]
     _kernel32 = None  # type: ignore[assignment]
     _KBDLLHOOKSTRUCT = None  # type: ignore[assignment, misc]
     _HOOKPROC = None  # type: ignore[assignment]
@@ -213,9 +213,7 @@ class HotkeyListener(QObject):
         if self._hook_thread is not None:
             return
         if sys.platform != "win32":
-            logger.warning(
-                "HotkeyListener: WH_KEYBOARD_LL requires Windows — listener not started"
-            )
+            logger.warning("HotkeyListener: WH_KEYBOARD_LL requires Windows — listener not started")
             return
         self._hook_thread = threading.Thread(
             target=self._run_hook_thread,
@@ -272,27 +270,16 @@ class HotkeyListener(QObject):
     # Hook callback (invoked by the OS on the hook thread)
     # ------------------------------------------------------------------
 
-    def _hook_callback(
-        self, n_code: int, w_param: int, l_param: int
-    ) -> int:
-        # Determine whether to swallow the event before any side-effectful work.
-        # should_swallow is set to True *before* the signal emitters are called so
-        # that if _on_trigger_down()/_on_trigger_up() raise (e.g. logger.exception
-        # fails because sys.stderr is None under pythonw.exe), the except clause
-        # still returns 1, preventing the OS from receiving the trigger key and
-        # opening the context menu or firing an app shortcut.
+    def _hook_callback(self, n_code: int, w_param: int, l_param: int) -> int:
         should_swallow = False
         if n_code >= 0:
             try:
-                kbd = ctypes.cast(
-                    l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)
-                ).contents
+                kbd = ctypes.cast(l_param, ctypes.POINTER(_KBDLLHOOKSTRUCT)).contents
                 if kbd.vkCode == self._trigger_vk and not (kbd.flags & LLKHF_INJECTED):
+                    should_swallow = True
                     if w_param in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                        should_swallow = True
                         self._on_trigger_down()
                     elif w_param in (WM_KEYUP, WM_SYSKEYUP):
-                        should_swallow = True
                         self._on_trigger_up()
             except Exception:
                 logger.exception("Error in keyboard hook callback")

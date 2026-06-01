@@ -108,3 +108,41 @@ def test_audio_callback_stops_at_max_duration(recorder: AudioRecorder) -> None:
 
     assert recorder._recording is False
     assert len(recorder._frames) == 0
+
+
+# ------------------------------------------------------------------
+# abort()
+# ------------------------------------------------------------------
+
+
+def test_abort_on_idle_recorder_is_safe(recorder: AudioRecorder) -> None:
+    """abort() must be a no-op when the recorder was never started."""
+    recorder.abort()  # stream is None — must not raise
+
+
+def test_abort_clears_frames_and_closes_stream(recorder: AudioRecorder) -> None:
+    mock_stream = MagicMock()
+    with patch("sounddevice.InputStream", return_value=mock_stream):
+        recorder.start()
+        recorder._frames.append(np.zeros((160, 1), dtype="float32"))
+
+    recorder.abort()
+
+    assert recorder._frames == []
+    assert recorder._recording is False
+    assert recorder._stream is None
+    mock_stream.stop.assert_called_once()
+    mock_stream.close.assert_called_once()
+
+
+def test_abort_does_not_write_wav(recorder: AudioRecorder, tmp_path) -> None:
+    """abort() must discard audio — no temp file created."""
+    mock_stream = MagicMock()
+    with patch("sounddevice.InputStream", return_value=mock_stream):
+        recorder.start()
+        recorder._frames.append(np.zeros((160, 1), dtype="float32"))
+
+    with patch.object(recorder, "_write_temp") as mock_write:
+        recorder.abort()
+
+    mock_write.assert_not_called()

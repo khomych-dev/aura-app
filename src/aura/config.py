@@ -48,6 +48,9 @@ SAMPLE_RATE: int = 16_000       # Hz — optimal input rate for Whisper
 CHANNELS: int = 1               # mono
 MIN_RECORDING_DURATION: float = 0.5    # seconds — shorter clips are discarded
 MAX_RECORDING_DURATION: float = 300.0  # seconds — soft stop limit
+# Extra audio captured after key release so Whisper can decode the final token.
+# Without trailing silence the last word is frequently clipped or misrecognised.
+POST_ROLL_PADDING_MS: int = 400
 
 # --- Hotkey ---
 # Trigger key name — override via HOTKEY_KEY in .env.

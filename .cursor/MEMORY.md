@@ -81,6 +81,15 @@ aura-app/
 
 ## Completed (continued)
 
+- 2026-06-01 Сесія 12: Audio Post-Roll Padding Fix v0.5.3 — Whisper Clipping:
+  - `config.py`: `POST_ROLL_PADDING_MS: int = 400` — named constant for post-roll duration
+  - `recorder.py`: `abort()` — stops stream + discards frames without WAV write; used when new recording starts before post-roll timer fires
+  - `app.py`: `_on_recording_stopped` now defers stream finalization via `QTimer(POST_ROLL_PADDING_MS)`; new `_finalize_recording` `@Slot` called by timer; `_on_recording_started` cancels active timer + calls `abort()` on rapid re-press; `shutdown()` stops timer + aborts if timer was active during teardown
+  - `hotkey.py`: pre-existing regression fixed — `should_swallow = True` moved inside `not LLKHF_INJECTED` guard; injected trigger-key events now correctly forward via `CallNextHookEx`
+  - 94/94 tests, 88.91% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
 - 2026-06-01 Сесія 11: Critical Fix v0.5.2 — Modifier Latching + Context Menu Leak + pythonw Crash:
   - `injector.py`: private `_user32_inj = ctypes.WinDLL("user32")`; `_MODIFIER_VKS` with per-entry `(vk, is_extended)` flag; `_release_modifiers()` sends `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for extended VK codes (VK_RCONTROL, VK_RMENU, VK_APPS) BEFORE pynput secondary layer; `Key.space` removed from `_MODIFIER_KEYS`
   - `hotkey.py`: `_hook_callback` refactored with `should_swallow` flag set BEFORE signal emitter calls — trigger key always consumed even if state machine raises (context menu leak fix)

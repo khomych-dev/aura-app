@@ -98,6 +98,29 @@ class AudioRecorder:
         audio = np.concatenate(frames, axis=0)
         return self._write_temp(audio)
 
+    def abort(self) -> None:
+        """Cancel the current recording immediately, discarding all captured audio.
+
+        Safe to call even when the recorder was never started.  Use this when
+        a new recording is triggered before a pending post-roll has finished —
+        the in-progress audio is thrown away and the stream is closed so
+        :meth:`start` can open a fresh one.
+        """
+        with self._lock:
+            self._recording = False
+            self._frames = []
+
+        if self._stream is not None:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                logger.exception("Error closing audio stream during abort")
+            finally:
+                self._stream = None
+
+        logger.debug("Audio recording aborted — frames discarded")
+
     @staticmethod
     def cleanup(path: str | None) -> None:
         """Delete the temp audio file.  Safe to call with ``None``."""
