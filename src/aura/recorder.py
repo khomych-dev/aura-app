@@ -16,16 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class AudioRecorder:
-    """Streams microphone input to a WAV temp file.
-
-    Usage::
-
-        recorder = AudioRecorder()
-        recorder.start()           # begins capturing
-        path = recorder.stop()     # returns temp-file path or None
-        # ... use path ...
-        recorder.cleanup(path)     # always delete when done
-    """
+    """Streams microphone input to a WAV temp file."""
 
     def __init__(
         self,
@@ -43,19 +34,13 @@ class AudioRecorder:
         self._lock = threading.Lock()
         self._recording = False
         self._start_time: float = 0.0
+
         self._stream: sd.InputStream | None = None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    def start(self) -> None:
-        """Begin recording.  Raises RuntimeError if no microphone is available."""
-        with self._lock:
-            self._frames = []
-            self._recording = True
-            self._start_time = time.monotonic()
-
+    def _ensure_stream_running(self) -> None:
+        """Opens the audio stream if it's not already open."""
+        if self._stream is not None:
+            return
         try:
             self._stream = sd.InputStream(
                 samplerate=self._sample_rate,
@@ -64,70 +49,52 @@ class AudioRecorder:
                 callback=self._audio_callback,
             )
             self._stream.start()
-            logger.debug("Audio recording started (sr=%d, ch=%d)", self._sample_rate, self._channels)
+            logger.debug("Background audio stream opened")
         except Exception as exc:
-            with self._lock:
-                self._recording = False
+            self._stream = None
             raise RuntimeError(f"Microphone unavailable: {exc}") from exc
 
-    def stop(self) -> str | None:
-        """Stop recording and persist audio to a WAV temp file.
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-        Returns the path to the temp file, or ``None`` if the recording was
-        too short or produced no audio.  The caller is responsible for
-        deleting the file via :meth:`cleanup`.
-        """
+    def start(self) -> None:
+        """Begin recording."""
+        self._ensure_stream_running()
+
+        with self._lock:
+            self._frames.clear()
+            self._recording = True
+            self._start_time = time.monotonic()
+        logger.debug("Capture started")
+
+    def stop(self) -> str | None:
+        """Stop capturing and persist audio to a WAV temp file."""
         with self._lock:
             self._recording = False
             duration = time.monotonic() - self._start_time
             frames = list(self._frames)
 
-        if self._stream is not None:
-            try:
-                self._stream.stop()
-                self._stream.close()
-            except Exception:
-                logger.exception("Error closing audio stream")
-            finally:
-                self._stream = None
-
         if duration < self._min_duration or not frames:
-            logger.debug("Recording discarded: duration=%.2fs (min=%.2fs)", duration, self._min_duration)
+            logger.debug("Recording discarded: duration=%.2fs", duration)
             return None
 
         audio = np.concatenate(frames, axis=0)
         return self._write_temp(audio)
 
     def abort(self) -> None:
-        """Cancel the current recording immediately, discarding all captured audio.
-
-        Safe to call even when the recorder was never started.  Use this when
-        a new recording is triggered before a pending post-roll has finished —
-        the in-progress audio is thrown away and the stream is closed so
-        :meth:`start` can open a fresh one.
-        """
+        """Cancel the current recording immediately."""
         with self._lock:
             self._recording = False
-            self._frames = []
-
-        if self._stream is not None:
-            try:
-                self._stream.stop()
-                self._stream.close()
-            except Exception:
-                logger.exception("Error closing audio stream during abort")
-            finally:
-                self._stream = None
-
-        logger.debug("Audio recording aborted — frames discarded")
+            self._frames.clear()
+        logger.debug("Capture aborted")
 
     @staticmethod
     def cleanup(path: str | None) -> None:
-        """Delete the temp audio file.  Safe to call with ``None``."""
+        """Delete the temp audio file."""
         if path and os.path.exists(path):
             try:
                 os.unlink(path)
-                logger.debug("Temp audio file deleted")
             except OSError:
                 logger.warning("Could not delete temp file")
 
@@ -151,7 +118,7 @@ class AudioRecorder:
 
             elapsed = time.monotonic() - self._start_time
             if elapsed > self._max_duration:
-                logger.info("Max recording duration (%.0fs) reached — stopping", self._max_duration)
+                logger.info("Max duration reached")
                 self._recording = False
                 return
 
@@ -161,6 +128,6 @@ class AudioRecorder:
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False, prefix="aura_")
         path = tmp.name
         tmp.close()
-        sf.write(path, audio, self._sample_rate)
-        logger.debug("Audio written to temp file (%.2fs)", len(audio) / self._sample_rate)
+
+        sf.write(path, audio, self._sample_rate, subtype="PCM_16")
         return path
