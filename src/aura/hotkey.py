@@ -5,6 +5,7 @@ import ctypes.wintypes
 import logging
 import sys
 import threading
+import time
 
 from PySide6.QtCore import QObject, Signal
 
@@ -135,6 +136,7 @@ class HotkeyListener(QObject):
         self._hook_thread: threading.Thread | None = None
         self._thread_id: int = 0
         self._hook_proc_ref: object = None
+        self._last_trigger_time: float = 0.0
 
     def start(self) -> None:
         if self._hook_thread is not None:
@@ -201,6 +203,12 @@ class HotkeyListener(QObject):
     def _on_trigger_down(self) -> None:
         if self._held:
             return
+
+        now = time.time()
+        if now - self._last_trigger_time < 0.1:
+            return
+        self._last_trigger_time = now
+
         self._held = True
         if not self._recording:
             self._recording = True

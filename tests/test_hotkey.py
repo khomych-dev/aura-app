@@ -195,14 +195,15 @@ def test_debounce_prevents_immediate_restart(listener: HotkeyListener) -> None:
 
 
 def test_debounce_allows_restart_after_wait(listener: HotkeyListener) -> None:
+
     started: list[bool] = []
     listener.recording_started.connect(lambda: started.append(True))
 
     listener._on_trigger_down()
     listener._on_trigger_up()
 
-    # Back-date last_stop_ts to simulate 300 ms elapsed (> HOTKEY_DEBOUNCE_MS)
-    listener._last_stop_ts = time.monotonic() - 0.3
+    # Back-date _last_trigger_time to simulate elapsed time
+    listener._last_trigger_time = time.time() - 0.3
 
     listener._on_trigger_down()
 

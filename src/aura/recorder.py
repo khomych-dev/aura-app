@@ -87,6 +87,10 @@ class AudioRecorder:
         with self._lock:
             self._recording = False
             self._frames.clear()
+            if self._stream is not None:
+                self._stream.stop()
+                self._stream.close()
+                self._stream = None
         logger.debug("Capture aborted")
 
     @staticmethod
