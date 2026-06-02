@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import logging
 import sys
 
@@ -26,18 +25,36 @@ def get_active_language() -> str | None:
         return None
 
     try:
+        import ctypes.wintypes
+
         user32 = ctypes.windll.user32  # type: ignore[attr-defined]
 
-        # GetKeyboardLayout returns HKL which is a pointer-sized handle.
-        # c_void_p preserves the full 64-bit value on 64-bit Windows.
-        user32.GetKeyboardLayout.restype = ctypes.c_void_p
+        # 1. Declare exact types to prevent 64-bit pointer truncation
+        user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
+        user32.GetForegroundWindow.argtypes = []
 
+        user32.GetWindowThreadProcessId.restype = ctypes.wintypes.DWORD
+        user32.GetWindowThreadProcessId.argtypes = [
+            ctypes.wintypes.HWND,
+            ctypes.POINTER(ctypes.wintypes.DWORD),
+        ]
+
+        user32.GetKeyboardLayout.restype = ctypes.c_void_p
+        user32.GetKeyboardLayout.argtypes = [ctypes.wintypes.DWORD]
+
+        # 2. Get active window
         hwnd = user32.GetForegroundWindow()
         if not hwnd:
             logger.debug("GetForegroundWindow returned NULL — no active window")
             return None
 
+        # 3. Get thread ID of that window
         thread_id = user32.GetWindowThreadProcessId(hwnd, None)
+        if not thread_id:
+            logger.debug("Failed to get thread ID for HWND")
+            return None
+
+        # 4. Get keyboard layout for that thread
         hkl = user32.GetKeyboardLayout(thread_id)
 
         # Lower 16 bits of HKL encode the primary LANGID.
