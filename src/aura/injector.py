@@ -27,7 +27,7 @@ if sys.platform == "win32":
             ("dwExtraInfo", ctypes.c_void_p),
         )
 
-    class _INPUT_UNION(ctypes.Union):
+    class _INPUT_UNION(ctypes.Union):  # noqa: N801
         _fields_ = (("ki", KEYBDINPUT), ("padding", ctypes.c_byte * 32))
 
     class INPUT(ctypes.Structure):
