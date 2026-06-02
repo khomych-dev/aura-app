@@ -4,15 +4,18 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv(usecwd=True))
 
 # Resolve base directory for both source and PyInstaller .exe contexts
 if getattr(sys, "frozen", False):
     _APP_DIR = Path(sys.executable).parent
 else:
-    _APP_DIR = Path(__file__).resolve().parent.parent.parent
+    _APP_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(_APP_DIR / ".env")
+if not os.environ.get("OPENAI_API_KEY"):
+    load_dotenv(_APP_DIR / ".env")
 
 # --- API ---
 OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
@@ -44,9 +47,9 @@ LANGUAGE_MAP: dict[int, str] = {
 DEFAULT_LANGUAGE: str = "auto"
 
 # --- Audio ---
-SAMPLE_RATE: int = 16_000       # Hz — optimal input rate for Whisper
-CHANNELS: int = 1               # mono
-MIN_RECORDING_DURATION: float = 0.5    # seconds — shorter clips are discarded
+SAMPLE_RATE: int = 16_000  # Hz — optimal input rate for Whisper
+CHANNELS: int = 1  # mono
+MIN_RECORDING_DURATION: float = 0.5  # seconds — shorter clips are discarded
 MAX_RECORDING_DURATION: float = 300.0  # seconds — soft stop limit
 # Extra audio captured after key release so Whisper can decode the final token.
 # Without trailing silence the last word is frequently clipped or misrecognised.
