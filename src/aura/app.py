@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
 
 from aura import config, lang_detector
 from aura.hotkey import HotkeyListener
@@ -80,6 +80,13 @@ class AppController(QObject):
         # the QObject before QThread's event loop can invoke run().
         self._current_worker: _TranscriptionWorker | None = None
 
+        # Post-roll timer: fires POST_ROLL_PADDING_MS after key release to
+        # finalise the recording.  Created once and reused across recordings.
+        self._post_roll_timer: QTimer | None = None
+        # Language resolved at key-release time (foreground window still belongs
+        # to the user); read by _finalize_recording after the delay.
+        self._pending_language: str | None = None
+
         # pynput runs in a plain Python threading.Thread (not a QThread).
         # AutoConnection does not reliably produce QueuedConnection in that
         # case — PySide6 may fall back to DirectConnection, executing the slot
@@ -102,6 +109,14 @@ class AppController(QObject):
 
     @Slot()
     def _on_recording_started(self) -> None:
+        # A new press while a post-roll is still pending means the user
+        # immediately re-dictated.  Cancel the deferred stop and discard the
+        # previous (incomplete) audio so the stream is free for a fresh start.
+        if self._post_roll_timer is not None and self._post_roll_timer.isActive():
+            self._post_roll_timer.stop()
+            self._recorder.abort()
+            logger.debug("Post-roll cancelled — new recording started immediately")
+
         logger.debug("Recording started")
         try:
             self._recorder.start()
@@ -112,9 +127,24 @@ class AppController(QObject):
 
     @Slot()
     def _on_recording_stopped(self) -> None:
-        logger.debug("Recording stopped")
+        logger.debug("Recording stopped — post-roll %dms", config.POST_ROLL_PADDING_MS)
         self._indicator.hide()
 
+        # Resolve language now: the user's foreground window is still active at
+        # the moment of key release.  After the 400ms post-roll delay the window
+        # focus may have shifted.
+        self._pending_language = self._resolve_language()
+
+        # Lazy-create the timer once; reuse it across recordings.
+        if self._post_roll_timer is None:
+            self._post_roll_timer = QTimer(self)
+            self._post_roll_timer.setSingleShot(True)
+            self._post_roll_timer.timeout.connect(self._finalize_recording)
+        self._post_roll_timer.start(config.POST_ROLL_PADDING_MS)
+
+    @Slot()
+    def _finalize_recording(self) -> None:
+        """Called by the post-roll QTimer — runs on the Qt main thread."""
         audio_path = self._recorder.stop()
         if audio_path is None:
             return
@@ -124,9 +154,7 @@ class AppController(QObject):
             AudioRecorder.cleanup(audio_path)
             return
 
-        # Resolve language while the user's window is still the foreground window.
-        language = self._resolve_language()
-        self._start_transcription(audio_path, language)
+        self._start_transcription(audio_path, self._pending_language)
 
     # ------------------------------------------------------------------
     # Language resolution
@@ -222,6 +250,9 @@ class AppController(QObject):
     def shutdown(self) -> None:
         logger.info("Shutting down Aura")
         self._hotkey.stop()
+        if self._post_roll_timer is not None and self._post_roll_timer.isActive():
+            self._post_roll_timer.stop()
+            self._recorder.abort()
         if self._is_worker_running():
             self._worker_thread.quit()  # type: ignore[union-attr]  # guarded above
             self._worker_thread.wait(3_000)  # type: ignore[union-attr]

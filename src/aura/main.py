@@ -8,10 +8,20 @@ import signal
 import sys
 import tempfile
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
+_IS_HEADLESS = sys.stdout is None
 
-from aura import config
+
+if _IS_HEADLESS:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+if sys.stdin is None:
+    sys.stdin = open(os.devnull, encoding="utf-8")
+
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from aura import config  # noqa: E402
 
 # Held for the process lifetime to prevent the OS from releasing the mutex
 # when the handle is garbage-collected.
@@ -29,13 +39,12 @@ def _setup_logging() -> None:
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     file_handler.setFormatter(fmt)
 
-    # Under pythonw.exe sys.stdout is None — only add the console handler when
-    # a real stream is available (i.e. when running from a developer terminal).
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     root.handlers.clear()
     root.addHandler(file_handler)
-    if sys.stdout is not None:
+
+    if not _IS_HEADLESS:
         stream_handler = logging.StreamHandler(sys.stdout)
         stream_handler.setFormatter(fmt)
         root.addHandler(stream_handler)

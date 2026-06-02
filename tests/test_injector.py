@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -107,3 +108,78 @@ def test_paste_does_not_raise_when_both_strategies_fail(injector: TextInjector) 
     ):
         # Must not propagate — errors are logged, not raised
         injector.paste("text")
+
+
+# ---------------------------------------------------------------------------
+# Win32 modifier-release regression (Bug 1 fix — KEYEVENTF_EXTENDEDKEY)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 keybd_event path is Windows-only")
+def test_release_modifiers_calls_keybd_event_for_every_modifier_vk(
+    injector: TextInjector,
+) -> None:
+    from aura.injector import _MODIFIER_VKS  # type: ignore[attr-defined]
+
+    with patch("aura.injector._user32_inj") as mock_u32:
+        mock_u32.keybd_event = MagicMock()
+        injector._release_modifiers()
+
+    assert mock_u32.keybd_event.call_count == len(_MODIFIER_VKS)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 keybd_event path is Windows-only")
+def test_release_modifiers_sets_extendedkey_flag_for_vk_apps(
+    injector: TextInjector,
+) -> None:
+    """Regression: VK_APPS (0x5D) requires KEYEVENTF_EXTENDEDKEY.
+    Without it the OS context-menu state machine does not clear the key slot."""
+    from aura.injector import _KEYEVENTF_EXTENDEDKEY, _KEYEVENTF_KEYUP  # type: ignore[attr-defined]
+
+    captured: list[tuple] = []
+    with patch("aura.injector._user32_inj") as mock_u32:
+        mock_u32.keybd_event.side_effect = lambda *a: captured.append(a)
+        injector._release_modifiers()
+
+    vk_apps = [c for c in captured if c[0] == 0x5D]
+    assert len(vk_apps) == 1, "Expected exactly one keybd_event call for VK_APPS (0x5D)"
+    flags = vk_apps[0][2]
+    assert flags & _KEYEVENTF_KEYUP, "KEYEVENTF_KEYUP must be set"
+    assert flags & _KEYEVENTF_EXTENDEDKEY, "KEYEVENTF_EXTENDEDKEY must be set for VK_APPS"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 keybd_event path is Windows-only")
+def test_release_modifiers_sets_extendedkey_flag_for_vk_rcontrol(
+    injector: TextInjector,
+) -> None:
+    """Regression: VK_RCONTROL (0xA3) requires KEYEVENTF_EXTENDEDKEY.
+    Without it the OS scan-code slot for Right Ctrl stays stuck 'down'."""
+    from aura.injector import _KEYEVENTF_EXTENDEDKEY, _KEYEVENTF_KEYUP  # type: ignore[attr-defined]
+
+    captured: list[tuple] = []
+    with patch("aura.injector._user32_inj") as mock_u32:
+        mock_u32.keybd_event.side_effect = lambda *a: captured.append(a)
+        injector._release_modifiers()
+
+    vk_rctrl = [c for c in captured if c[0] == 0xA3]
+    assert len(vk_rctrl) == 1, "Expected exactly one keybd_event call for VK_RCONTROL (0xA3)"
+    flags = vk_rctrl[0][2]
+    assert flags & _KEYEVENTF_KEYUP
+    assert flags & _KEYEVENTF_EXTENDEDKEY, "KEYEVENTF_EXTENDEDKEY must be set for VK_RCONTROL"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 keybd_event path is Windows-only")
+def test_release_modifiers_no_extendedkey_flag_for_vk_lcontrol(
+    injector: TextInjector,
+) -> None:
+    """VK_LCONTROL (0xA2) is NOT an extended key — EXTENDEDKEY flag must be absent."""
+    from aura.injector import _KEYEVENTF_EXTENDEDKEY  # type: ignore[attr-defined]
+
+    captured: list[tuple] = []
+    with patch("aura.injector._user32_inj") as mock_u32:
+        mock_u32.keybd_event.side_effect = lambda *a: captured.append(a)
+        injector._release_modifiers()
+
+    vk_lctrl = [c for c in captured if c[0] == 0xA2]
+    assert len(vk_lctrl) == 1
+    assert not (vk_lctrl[0][2] & _KEYEVENTF_EXTENDEDKEY), "VK_LCONTROL is not an extended key"

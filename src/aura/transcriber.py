@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import openai
 
@@ -28,10 +29,7 @@ class Transcriber:
         self._client = openai.OpenAI(
             api_key=api_key,
             # Hard deadline for the entire request (connect + upload + processing).
-            # Without this the httpx client waits forever, silently hanging the thread.
             timeout=timeout,
-            # Disable SDK-level retries: on timeout we want to fail fast and let the
-            # user record again, not silently retry and multiply the wait time.
             max_retries=0,
         )
         self._model = model
@@ -54,18 +52,30 @@ class Transcriber:
             language or "auto",
             self._client.timeout,
         )
-        try:
-            with open(audio_path, "rb") as audio_file:
-                kwargs: dict = {"model": self._model, "file": audio_file}
-                if language:
-                    kwargs["language"] = language
-                response = self._client.audio.transcriptions.create(**kwargs)
-        except openai.APITimeoutError:
-            logger.exception("Whisper API timed out after %.0f s", self._client.timeout)
-            raise
-        except Exception:
-            logger.exception("Whisper API call failed unexpectedly")
-            raise
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                with open(audio_path, "rb") as audio_file:
+                    kwargs: dict = {"model": self._model, "file": audio_file}
+                    if language:
+                        kwargs["language"] = language
+                    response = self._client.audio.transcriptions.create(**kwargs)
+                    break
+            except openai.APITimeoutError:
+                if attempt == max_attempts:
+                    logger.exception("Whisper API timed out after %d attempts", max_attempts)
+                    raise
+
+                backoff = 2 ** (attempt - 1)
+                logger.warning(
+                    "Whisper API timeout (attempt %d/%d). Retrying in %ds...", attempt, max_attempts, backoff
+                )
+                time.sleep(backoff)
+            except Exception:
+                logger.exception("Whisper API call failed unexpectedly")
+                raise
+
         text = response.text.strip()
         logger.debug("Transcription received: %d chars", len(text))
         return text

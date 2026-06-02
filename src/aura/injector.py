@@ -1,117 +1,117 @@
 from __future__ import annotations
 
 import logging
+import sys
+import threading
 import time
-
-import pyperclip
-from pynput.keyboard import Controller, Key
 
 logger = logging.getLogger(__name__)
 
-# All keys that could be held down as part of the hotkey or accidentally
-# latched by the OS.  Sending KeyUp for an already-released key is harmless;
-# sending it for a genuinely-held modifier clears the ghost state.
-# Key.menu is included for keyboards that use that scancode as the trigger.
-_MODIFIER_KEYS: tuple[Key, ...] = (
-    Key.alt,
-    Key.alt_l,
-    Key.alt_r,
-    Key.shift,
-    Key.shift_l,
-    Key.shift_r,
-    Key.ctrl,
-    Key.ctrl_l,
-    Key.ctrl_r,
-    Key.cmd,
-    Key.menu,
-    Key.space,
-)
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
+    _user32_inj = ctypes.WinDLL("user32")  # type: ignore[attr-defined]
+
+    INPUT_KEYBOARD = 1
+    KEYEVENTF_UNICODE = 0x0004
+    KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_EXTENDEDKEY = 0x0001
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = (
+            ("wVk", ctypes.wintypes.WORD),
+            ("wScan", ctypes.wintypes.WORD),
+            ("dwFlags", ctypes.wintypes.DWORD),
+            ("time", ctypes.wintypes.DWORD),
+            ("dwExtraInfo", ctypes.c_void_p),
+        )
+
+    class _INPUT_UNION(ctypes.Union):
+        _fields_ = (("ki", KEYBDINPUT), ("padding", ctypes.c_byte * 32))
+
+    class INPUT(ctypes.Structure):
+        _anonymous_ = ("_u",)
+        _fields_ = (("type", ctypes.wintypes.DWORD), ("_u", _INPUT_UNION))
+
+    _user32_inj.SendInput.restype = ctypes.wintypes.UINT
+    _user32_inj.SendInput.argtypes = [ctypes.wintypes.UINT, ctypes.c_void_p, ctypes.c_int]
+
+    _user32_inj.keybd_event.restype = None
+    _user32_inj.keybd_event.argtypes = [
+        ctypes.wintypes.BYTE,
+        ctypes.wintypes.BYTE,
+        ctypes.wintypes.DWORD,
+        ctypes.c_void_p,
+    ]
+
+    _MODIFIER_VKS = (
+        (0x11, False),  # VK_CONTROL
+        (0xA2, False),  # VK_LCONTROL
+        (0x12, False),  # VK_MENU (Alt)
+        (0xA4, False),  # VK_LMENU
+        (0xA5, True),  # VK_RMENU
+        (0x10, False),  # VK_SHIFT
+        (0xA0, False),  # VK_LSHIFT
+        (0xA1, False),  # VK_RSHIFT
+    )
+else:
+    _user32_inj = None  # type: ignore[assignment]
 
 
 class TextInjector:
-    """Injects text at the current cursor position in the active application.
-
-    Primary method: direct keystroke injection via ``keyboard.type()``.
-    On Windows, pynput uses ``SendInput`` with ``KEYEVENTF_UNICODE``, so every
-    character is an independent OS-level event that:
-    - requires no clipboard interaction (no race conditions, no restore step)
-    - is unaffected by modifier ghosting (the hotkey key can remain latched at
-      the OS level after release; typing each character avoids this entirely)
-    - works natively with Ukrainian, Russian and any other Unicode script
-
-    Fallback: clipboard (pyperclip + Ctrl+V + restore).  Retained for edge
-    cases where ``SendInput`` is blocked (e.g. some privileged terminal
-    emulators or UAC dialogs).
-    """
-
-    def __init__(self) -> None:
-        self._keyboard = Controller()
+    """Injects text directly via native Windows Unicode API, avoiding the clipboard entirely."""
 
     def paste(self, text: str) -> None:
-        """Inject *text* at the active cursor position."""
         if not text:
             return
+        if sys.platform != "win32" or _user32_inj is None:
+            logger.error("Text injection is only supported on Windows in this version.")
+            return
+
+        threading.Thread(target=self._paste_worker, args=(text,), daemon=True).start()
+
+    def _paste_worker(self, text: str) -> None:
         try:
-            self._paste_via_typing(text)
+            self._release_modifiers()
+            time.sleep(0.05)
+            self._inject_unicode(text)
+            logger.debug("Text injected successfully (%d chars)", len(text))
         except Exception:
-            logger.warning("Direct typing failed — falling back to clipboard paste", exc_info=True)
-            try:
-                self._paste_via_clipboard(text)
-            except Exception:
-                logger.exception("Clipboard paste fallback also failed")
+            logger.exception("Native text injection failed")
 
-    # ------------------------------------------------------------------
-    # Strategies
-    # ------------------------------------------------------------------
+    def _inject_unicode(self, text: str) -> None:
+        """Uses Windows SendInput to type characters natively with a micro-delay."""
+        for char in text:
+            code = ord(char)
 
-    def _paste_via_typing(self, text: str) -> None:
-        """Primary: inject each character via SendInput + KEYEVENTF_UNICODE."""
-        self._release_modifiers()
-        time.sleep(0.05)  # give the OS a moment to clear the modifier state
-        self._keyboard.type(text)
-        logger.debug("Text injected via keyboard.type() (%d chars)", len(text))
+            # --- 1. Key Down ---
+            input_down = (INPUT * 1)()
+            input_down[0].type = INPUT_KEYBOARD
+            input_down[0].ki.wVk = 0
+            input_down[0].ki.wScan = code
+            input_down[0].ki.dwFlags = KEYEVENTF_UNICODE
 
-    def _paste_via_clipboard(self, text: str) -> None:
-        """Fallback: place text in clipboard and simulate Ctrl+V."""
-        previous: str = ""
-        try:
-            previous = pyperclip.paste() or ""
-        except Exception:
-            logger.debug("Could not read current clipboard contents")
+            _user32_inj.SendInput(1, ctypes.byref(input_down), ctypes.sizeof(INPUT))
 
-        pyperclip.copy(text)
-        time.sleep(0.1)  # allow clipboard to propagate to all processes
+            time.sleep(0.015)
 
-        self._release_modifiers()
-        time.sleep(0.05)  # give the OS a moment to clear the modifier state
+            # --- 2. Key Up ---
+            input_up = (INPUT * 1)()
+            input_up[0].type = INPUT_KEYBOARD
+            input_up[0].ki.wVk = 0
+            input_up[0].ki.wScan = code
+            input_up[0].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
 
-        with self._keyboard.pressed(Key.ctrl):
-            self._keyboard.press("v")
-            self._keyboard.release("v")
+            _user32_inj.SendInput(1, ctypes.byref(input_up), ctypes.sizeof(INPUT))
 
-        # Wait long enough for the target app to fully read the clipboard
-        # before we overwrite it with the restored content.
-        time.sleep(0.3)
-
-        try:
-            pyperclip.copy(previous)
-        except Exception:
-            logger.debug("Could not restore previous clipboard contents")
-
-        logger.debug("Text injected via clipboard (%d chars)", len(text))
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+            time.sleep(0.02)
 
     def _release_modifiers(self) -> None:
-        """Send KeyUp for every modifier key that could be ghosting.
-
-        Sending KeyUp for a key that is already released is a no-op at the
-        OS level, so it is safe to unconditionally release the full list.
-        """
-        for key in _MODIFIER_KEYS:
+        """Sends KeyUp for standard modifiers (Ctrl, Alt, Shift) to prevent shortcuts."""
+        for vk, extended in _MODIFIER_VKS:
+            flags = KEYEVENTF_KEYUP | (KEYEVENTF_EXTENDEDKEY if extended else 0)
             try:
-                self._keyboard.release(key)
+                _user32_inj.keybd_event(vk, 0, flags, None)
             except Exception:
-                pass  # unknown key on this layout — skip silently
+                pass

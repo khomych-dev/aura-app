@@ -114,58 +114,132 @@ def test_on_recording_started_does_not_show_indicator_on_mic_error(controller: A
     controller._indicator.show.assert_not_called()
 
 
+def test_on_recording_started_cancels_active_post_roll_and_aborts_recorder(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    """Rapid re-press during post-roll must cancel the timer and abort the stream."""
+    mocker.patch.object(controller, "_resolve_language", return_value=None)
+    controller._on_recording_stopped()  # arms the timer
+    assert controller._post_roll_timer is not None
+    assert controller._post_roll_timer.isActive()
+
+    controller._on_recording_started()
+
+    assert not controller._post_roll_timer.isActive()
+    controller._recorder.abort.assert_called_once()
+    controller._recorder.start.assert_called_once()
+
+
 # ------------------------------------------------------------------
 # AppController — recording_stopped
 # ------------------------------------------------------------------
 
 
-def test_on_recording_stopped_hides_indicator(controller: AppController, mocker) -> None:  # type: ignore[type-arg]
-    controller._recorder.stop.return_value = None
+def test_on_recording_stopped_hides_indicator_immediately(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
     mocker.patch.object(controller, "_resolve_language", return_value=None)
 
     controller._on_recording_stopped()
 
     controller._indicator.hide.assert_called_once()
+    # Cleanup: stop timer so it doesn't fire after the test
+    controller._post_roll_timer.stop()  # type: ignore[union-attr]
 
 
-def test_on_recording_stopped_returns_early_on_no_audio(controller: AppController, mocker) -> None:  # type: ignore[type-arg]
-    controller._recorder.stop.return_value = None
-    mocker.patch.object(controller, "_resolve_language", return_value=None)
-    mock_start = mocker.patch.object(controller, "_start_transcription")
+def test_on_recording_stopped_schedules_post_roll_timer(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    """stop() on the recorder must NOT be called immediately — only after the timer fires."""
+    mocker.patch.object(controller, "_resolve_language", return_value="uk")
 
     controller._on_recording_stopped()
+
+    assert controller._post_roll_timer is not None
+    assert controller._post_roll_timer.isActive()
+    controller._recorder.stop.assert_not_called()
+    # Cleanup
+    controller._post_roll_timer.stop()
+
+
+def test_on_recording_stopped_saves_pending_language(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    mocker.patch.object(controller, "_resolve_language", return_value="uk")
+
+    controller._on_recording_stopped()
+
+    assert controller._pending_language == "uk"
+    controller._post_roll_timer.stop()  # type: ignore[union-attr]
+
+
+def test_on_recording_stopped_reuses_timer_across_recordings(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    mocker.patch.object(controller, "_resolve_language", return_value=None)
+
+    controller._on_recording_stopped()
+    timer_first = controller._post_roll_timer
+    controller._post_roll_timer.stop()  # type: ignore[union-attr]
+
+    controller._on_recording_stopped()
+    timer_second = controller._post_roll_timer
+    controller._post_roll_timer.stop()  # type: ignore[union-attr]
+
+    assert timer_first is timer_second
+
+
+# ------------------------------------------------------------------
+# AppController — _finalize_recording
+# ------------------------------------------------------------------
+
+
+def test_finalize_recording_returns_early_on_no_audio(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    controller._recorder.stop.return_value = None
+    controller._pending_language = None
+    mock_start = mocker.patch.object(controller, "_start_transcription")
+
+    controller._finalize_recording()
 
     mock_start.assert_not_called()
 
 
-def test_on_recording_stopped_discards_audio_when_transcription_running(
+def test_finalize_recording_starts_transcription_with_audio(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
     controller._recorder.stop.return_value = "/tmp/aura_test.wav"
-    mocker.patch.object(controller, "_resolve_language", return_value=None)
+    controller._pending_language = "uk"
+    controller._worker_thread = None
+    mock_start = mocker.patch.object(controller, "_start_transcription")
+
+    controller._finalize_recording()
+
+    mock_start.assert_called_once_with("/tmp/aura_test.wav", "uk")
+
+
+def test_finalize_recording_discards_audio_when_transcription_running(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    controller._recorder.stop.return_value = "/tmp/aura_test.wav"
+    controller._pending_language = None
     mock_thread = MagicMock()
     mock_thread.isRunning.return_value = True
     controller._worker_thread = mock_thread
 
     mock_cleanup = mocker.patch("aura.app.AudioRecorder.cleanup")
-    controller._on_recording_stopped()
+    controller._finalize_recording()
 
     mock_cleanup.assert_called_once_with("/tmp/aura_test.wav")
-
-
-def test_on_recording_stopped_starts_transcription_with_audio(
-    controller: AppController,
-    mocker,  # type: ignore[type-arg]
-) -> None:
-    controller._recorder.stop.return_value = "/tmp/aura_test.wav"
-    controller._worker_thread = None
-    mocker.patch.object(controller, "_resolve_language", return_value="uk")
-    mock_start = mocker.patch.object(controller, "_start_transcription")
-
-    controller._on_recording_stopped()
-
-    mock_start.assert_called_once_with("/tmp/aura_test.wav", "uk")
 
 
 # ------------------------------------------------------------------
@@ -285,3 +359,20 @@ def test_shutdown_waits_for_running_thread(controller: AppController) -> None:
 
     mock_thread.quit.assert_called_once()
     mock_thread.wait.assert_called_once_with(3_000)
+
+
+def test_shutdown_cancels_active_post_roll_and_aborts_recorder(
+    controller: AppController,
+    mocker,  # type: ignore[type-arg]
+) -> None:
+    """shutdown() must stop a pending post-roll timer and discard in-progress audio."""
+    mocker.patch.object(controller, "_resolve_language", return_value=None)
+    controller._on_recording_stopped()  # arms the timer
+    assert controller._post_roll_timer is not None
+    assert controller._post_roll_timer.isActive()
+    controller._worker_thread = None
+
+    controller.shutdown()
+
+    assert not controller._post_roll_timer.isActive()
+    controller._recorder.abort.assert_called_once()

@@ -81,6 +81,32 @@ aura-app/
 
 ## Completed (continued)
 
+- 2026-06-01 Сесія 12: Audio Post-Roll Padding Fix v0.5.3 — Whisper Clipping:
+  - `config.py`: `POST_ROLL_PADDING_MS: int = 400` — named constant for post-roll duration
+  - `recorder.py`: `abort()` — stops stream + discards frames without WAV write; used when new recording starts before post-roll timer fires
+  - `app.py`: `_on_recording_stopped` now defers stream finalization via `QTimer(POST_ROLL_PADDING_MS)`; new `_finalize_recording` `@Slot` called by timer; `_on_recording_started` cancels active timer + calls `abort()` on rapid re-press; `shutdown()` stops timer + aborts if timer was active during teardown
+  - `hotkey.py`: pre-existing regression fixed — `should_swallow = True` moved inside `not LLKHF_INJECTED` guard; injected trigger-key events now correctly forward via `CallNextHookEx`
+  - 94/94 tests, 88.91% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
+- 2026-06-01 Сесія 11: Critical Fix v0.5.2 — Modifier Latching + Context Menu Leak + pythonw Crash:
+  - `injector.py`: private `_user32_inj = ctypes.WinDLL("user32")`; `_MODIFIER_VKS` with per-entry `(vk, is_extended)` flag; `_release_modifiers()` sends `keybd_event` with `KEYEVENTF_EXTENDEDKEY` for extended VK codes (VK_RCONTROL, VK_RMENU, VK_APPS) BEFORE pynput secondary layer; `Key.space` removed from `_MODIFIER_KEYS`
+  - `hotkey.py`: `_hook_callback` refactored with `should_swallow` flag set BEFORE signal emitter calls — trigger key always consumed even if state machine raises (context menu leak fix)
+  - `main.py`: `sys.stdout`/`sys.stderr` → devnull guard moved to module level before first third-party import (PySide6, python-dotenv write to stderr during import)
+  - 11 regression tests added (7 `_hook_callback` + 4 Win32 modifier release)
+  - 86/86 tests, 88.68% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
+- 2026-06-01 Сесія 10: Post-Deploy Critical Fix v0.5.1 — ctypes Hook Crash + Silent Autostart + CI Platform:
+  - `hotkey.py`: `ctypes.windll.user32/kernel32` → private `ctypes.WinDLL("user32"/"kernel32")` instances; explicit `.argtypes`/`.restype` for all 9 Win32 functions (`SetWindowsHookExW`, `CallNextHookEx`, `UnhookWindowsHookEx`, `GetMessageW`, `TranslateMessage`, `DispatchMessageW`, `PostThreadMessageW`, `GetCurrentThreadId`, `GetLastError`); `_HOOKPROC` return type → `c_long` (mypy-safe LRESULT substitute); `argtypes[1]` references same `_HOOKPROC` type object used to create `proc` → ctypes type-identity check passes
+  - `install_autostart.py`: `Path(__file__).parent.resolve()` → `Path(__file__).resolve().parent`; pythonw path built with `.resolve()` — guaranteed fully-resolved absolute path to `.venv/Scripts/pythonw.exe`
+  - `ci.yml`: `runs-on: ubuntu-latest` → `runs-on: windows-latest`; removed `apt-get` Linux step; Windows runner installs pywin32 and all Windows-only deps from their native wheels
+  - 75/75 tests, 86.49% coverage, ruff clean, mypy clean
+
+## Completed (continued)
+
 - 2026-05-30 Сесія 7: Silent Autostart Fix + Right Ctrl Hotkey (v0.3.0):
   - `install_autostart.py`: bypass uv entirely; shortcut targets `.venv/Scripts/pythonw.exe -m aura.main` directly — guaranteed no console window
   - `hotkey.py`: trigger → Right Ctrl only; key-repeat debounce via `if key in _held_keys: return` at top of `_on_press`; removed `_CTRL_KEYS`, `_SHIFT_KEYS`, `_ctrl_held()`, `_shift_held()`
