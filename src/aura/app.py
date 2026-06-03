@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QRunnable, QThreadPool, QTimer, Signal, Slot
 
 from aura import config, lang_detector
 from aura.hotkey import HotkeyListener
@@ -15,15 +15,17 @@ from aura.tray import TrayIcon
 logger = logging.getLogger(__name__)
 
 
-class _TranscriptionWorker(QObject):
-    """Runs Whisper transcription in a dedicated QThread.
+class WorkerSignals(QObject):
+    finished = Signal(str)
+    error = Signal(str)
+
+
+class _TranscriptionWorker(QRunnable):
+    """Runs Whisper transcription in a QThreadPool.
 
     Always cleans up the temp audio file on completion, regardless of
     whether transcription succeeded or failed.
     """
-
-    finished = Signal(str)
-    error = Signal(str)
 
     def __init__(
         self,
@@ -32,6 +34,7 @@ class _TranscriptionWorker(QObject):
         language: str | None = None,
     ) -> None:
         super().__init__()
+        self.signals = WorkerSignals()
         self._transcriber = transcriber
         self._audio_path = audio_path
         self._language = language
@@ -40,11 +43,11 @@ class _TranscriptionWorker(QObject):
     def run(self) -> None:
         try:
             text = self._transcriber.transcribe(self._audio_path, language=self._language)
-            self.finished.emit(text)
+            self.signals.finished.emit(text)
         except Exception as exc:
             logger.exception("Transcription failed")
             try:
-                self.error.emit(str(exc))
+                self.signals.error.emit(str(exc))
             except Exception:
                 logger.exception("error signal emit failed")
         finally:
@@ -75,10 +78,7 @@ class AppController(QObject):
         self._tray = TrayIcon()
         self._hotkey = HotkeyListener()
 
-        self._worker_thread: QThread | None = None
-        # Strong Python reference to the worker — prevents GC from destroying
-        # the QObject before QThread's event loop can invoke run().
-        self._current_worker: _TranscriptionWorker | None = None
+        self._transcription_active = False
 
         # Post-roll timer: fires POST_ROLL_PADDING_MS after key release to
         # finalise the recording.  Created once and reused across recordings.
@@ -180,54 +180,24 @@ class AppController(QObject):
     # ------------------------------------------------------------------
 
     def _is_worker_running(self) -> bool:
-        """Return True only if the previous QThread is still alive.
-
-        Guards against ``RuntimeError: Internal C++ object already deleted``
-        that PySide6 raises when calling methods on a QThread whose C++ side
-        has been destroyed by ``deleteLater`` while the Python wrapper still
-        exists.
-        """
-        if self._worker_thread is None:
-            return False
-        try:
-            return self._worker_thread.isRunning()
-        except RuntimeError:
-            self._worker_thread = None
-            return False
+        """Return True only if a transcription is currently active."""
+        return self._transcription_active
 
     def _start_transcription(self, audio_path: str, language: str | None = None) -> None:
-        thread = QThread(self)
+        self._transcription_active = True
         worker = _TranscriptionWorker(self._transcriber, audio_path, language)
-        worker.moveToThread(thread)
 
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_transcription_done)
-        worker.error.connect(self._on_transcription_error)
-        worker.finished.connect(thread.quit)
-        worker.error.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        # _clear_worker_ref fires after deleteLater is scheduled, clearing both
-        # Python-side references so the next recording sees a clean slate.
-        thread.finished.connect(self._clear_worker_ref)
+        worker.signals.finished.connect(self._on_transcription_done)
+        worker.signals.error.connect(self._on_transcription_error)
+        worker.signals.finished.connect(self._clear_worker_ref)
+        worker.signals.error.connect(self._clear_worker_ref)
 
-        # Keep a strong Python reference so GC cannot destroy the worker between
-        # _start_transcription() returning and QThread calling run().
-        self._current_worker = worker
-        self._worker_thread = thread
-        thread.start()
+        QThreadPool.globalInstance().start(worker)
 
     @Slot()
     def _clear_worker_ref(self) -> None:
-        """Release Python references after the QThread has finished.
-
-        Called via thread.finished signal.  Clears both the worker and the
-        thread wrapper so ``_is_worker_running`` sees None on the next call
-        and ``deleteLater`` can fully reclaim the C++ objects without the
-        Python wrapper holding a stale pointer.
-        """
-        self._current_worker = None
-        self._worker_thread = None
+        """Clear transcription active flag."""
+        self._transcription_active = False
 
     @Slot(str)
     def _on_transcription_done(self, text: str) -> None:
@@ -254,5 +224,4 @@ class AppController(QObject):
             self._post_roll_timer.stop()
             self._recorder.abort()
         if self._is_worker_running():
-            self._worker_thread.quit()  # type: ignore[union-attr]  # guarded above
-            self._worker_thread.wait(3_000)  # type: ignore[union-attr]
+            QThreadPool.globalInstance().waitForDone(3000)

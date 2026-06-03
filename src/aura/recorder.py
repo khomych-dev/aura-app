@@ -74,6 +74,10 @@ class AudioRecorder:
             self._recording = False
             duration = time.monotonic() - self._start_time
             frames = list(self._frames)
+            if self._stream is not None:
+                self._stream.stop()
+                self._stream.close()
+                self._stream = None
 
         if duration < self._min_duration or not frames:
             logger.debug("Recording discarded: duration=%.2fs", duration)

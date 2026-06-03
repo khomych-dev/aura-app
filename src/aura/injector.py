@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import queue
 import threading
 import time
 
@@ -62,6 +63,14 @@ else:
 class TextInjector:
     """Injects text directly via native Windows Unicode API, avoiding the clipboard entirely."""
 
+    def __init__(self) -> None:
+        self._queue: queue.Queue[str] = queue.Queue()
+        threading.Thread(
+            target=self._worker_loop,
+            daemon=True,
+            name="aura-injector",
+        ).start()
+
     def paste(self, text: str) -> None:
         if not text:
             return
@@ -69,7 +78,13 @@ class TextInjector:
             logger.error("Text injection is only supported on Windows in this version.")
             return
 
-        threading.Thread(target=self._paste_worker, args=(text,), daemon=True).start()
+        self._queue.put(text)
+
+    def _worker_loop(self) -> None:
+        while True:
+            text = self._queue.get()
+            self._paste_worker(text)
+            self._queue.task_done()
 
     def _paste_worker(self, text: str) -> None:
         try:
