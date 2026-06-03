@@ -23,6 +23,7 @@ WHISPER_MODEL: str = "whisper-1"
 # Total request timeout for the Whisper API call (connect + upload + processing).
 # 30 s covers typical recordings up to ~2 min; raise if you regularly dictate longer.
 WHISPER_API_TIMEOUT: float = 30.0
+WHISPER_MAX_RETRIES: int = 3
 
 # Languages supported for transcription.
 SUPPORTED_LANGUAGES: list[str] = ["uk", "en", "ru"]

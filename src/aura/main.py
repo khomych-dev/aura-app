@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import glob
 import logging
 import logging.handlers
@@ -8,15 +9,20 @@ import signal
 import sys
 import tempfile
 
+logger = logging.getLogger(__name__)
+
 _IS_HEADLESS = sys.stdout is None
 
 
 if _IS_HEADLESS:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    atexit.register(sys.stdout.close)
 if sys.stderr is None:
     sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    atexit.register(sys.stderr.close)
 if sys.stdin is None:
     sys.stdin = open(os.devnull, encoding="utf-8")
+    atexit.register(sys.stdin.close)
 
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -70,7 +76,6 @@ def _acquire_single_instance_lock() -> bool:
 def _cleanup_orphaned_temp_files() -> None:
     """Delete any aura_*.wav files left over from a previous crash."""
     pattern = os.path.join(tempfile.gettempdir(), "aura_*.wav")
-    logger = logging.getLogger(__name__)
     for path in glob.glob(pattern):
         try:
             os.unlink(path)
@@ -81,7 +86,6 @@ def _cleanup_orphaned_temp_files() -> None:
 
 def main() -> None:
     _setup_logging()
-    logger = logging.getLogger(__name__)
 
     if not _acquire_single_instance_lock():
         logger.warning("Another Aura instance is already running — exiting.")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import openai
 
@@ -53,11 +54,11 @@ class Transcriber:
             self._client.timeout,
         )
 
-        max_attempts = 3
+        max_attempts = config.WHISPER_MAX_RETRIES
         for attempt in range(1, max_attempts + 1):
             try:
                 with open(audio_path, "rb") as audio_file:
-                    kwargs: dict = {"model": self._model, "file": audio_file}
+                    kwargs: dict[str, Any] = {"model": self._model, "file": audio_file}
                     if language:
                         kwargs["language"] = language
                     response = self._client.audio.transcriptions.create(**kwargs)
