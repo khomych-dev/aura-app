@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject, Qt, QRunnable, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 
 from aura import config, lang_detector
 from aura.hotkey import HotkeyListener
@@ -93,12 +93,8 @@ class AppController(QObject):
         # in the pynput daemon thread.  Constructing QThread/QObject from a
         # foreign thread deadlocks Qt internally.  Forcing QueuedConnection
         # guarantees the slots always run in the Qt main-thread event loop.
-        self._hotkey.recording_started.connect(
-            self._on_recording_started, Qt.ConnectionType.QueuedConnection
-        )
-        self._hotkey.recording_stopped.connect(
-            self._on_recording_stopped, Qt.ConnectionType.QueuedConnection
-        )
+        self._hotkey.recording_started.connect(self._on_recording_started, Qt.ConnectionType.QueuedConnection)
+        self._hotkey.recording_stopped.connect(self._on_recording_stopped, Qt.ConnectionType.QueuedConnection)
 
         self._hotkey.start()
         logger.info("AppController ready — hold Right Ctrl to dictate")
