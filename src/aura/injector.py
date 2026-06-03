@@ -60,6 +60,11 @@ else:
     _user32_inj = None  # type: ignore[assignment]
 
 
+_PRE_INJECT_DELAY_SEC = 0.05
+_KEY_DOWN_DELAY_SEC = 0.015
+_KEY_UP_DELAY_SEC = 0.02
+
+
 class TextInjector:
     """Injects text directly via native Windows Unicode API, avoiding the clipboard entirely."""
 
@@ -89,7 +94,7 @@ class TextInjector:
     def _paste_worker(self, text: str) -> None:
         try:
             self._release_modifiers()
-            time.sleep(0.05)
+            time.sleep(_PRE_INJECT_DELAY_SEC)
             self._inject_unicode(text)
             logger.debug("Text injected successfully (%d chars)", len(text))
         except Exception:
@@ -109,7 +114,7 @@ class TextInjector:
 
             _user32_inj.SendInput(1, ctypes.byref(input_down), ctypes.sizeof(INPUT))
 
-            time.sleep(0.015)
+            time.sleep(_KEY_DOWN_DELAY_SEC)
 
             # --- 2. Key Up ---
             input_up = (INPUT * 1)()
@@ -120,7 +125,7 @@ class TextInjector:
 
             _user32_inj.SendInput(1, ctypes.byref(input_up), ctypes.sizeof(INPUT))
 
-            time.sleep(0.02)
+            time.sleep(_KEY_UP_DELAY_SEC)
 
     def _release_modifiers(self) -> None:
         """Sends KeyUp for standard modifiers (Ctrl, Alt, Shift) to prevent shortcuts."""
@@ -128,5 +133,5 @@ class TextInjector:
             flags = KEYEVENTF_KEYUP | (KEYEVENTF_EXTENDEDKEY if extended else 0)
             try:
                 _user32_inj.keybd_event(vk, 0, flags, None)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to release modifier: %s", exc)

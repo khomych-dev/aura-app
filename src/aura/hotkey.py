@@ -205,7 +205,7 @@ class HotkeyListener(QObject):
             return
 
         now = time.time()
-        if now - self._last_trigger_time < 0.1:
+        if now - self._last_trigger_time < (config.HOTKEY_DEBOUNCE_MS / 1000.0):
             return
         self._last_trigger_time = now
 
