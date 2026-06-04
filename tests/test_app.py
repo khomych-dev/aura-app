@@ -102,16 +102,16 @@ def test_worker_cleans_up_on_success(qt_app: object, mocker) -> None:  # type: i
 def test_on_recording_started_starts_recorder_and_shows_indicator(controller: AppController) -> None:
     controller._on_recording_started()
 
-    controller._recorder.start.assert_called_once()
-    controller._indicator.show.assert_called_once()
+    controller._recorder.start.assert_called_once()  # type: ignore
+    controller._indicator.show.assert_called_once()  # type: ignore
 
 
 def test_on_recording_started_does_not_show_indicator_on_mic_error(controller: AppController) -> None:
-    controller._recorder.start.side_effect = RuntimeError("no microphone")
+    controller._recorder.start.side_effect = RuntimeError("no microphone")  # type: ignore
 
     controller._on_recording_started()
 
-    controller._indicator.show.assert_not_called()
+    controller._indicator.show.assert_not_called()  # type: ignore
 
 
 def test_on_recording_started_cancels_active_post_roll_and_aborts_recorder(
@@ -127,8 +127,8 @@ def test_on_recording_started_cancels_active_post_roll_and_aborts_recorder(
     controller._on_recording_started()
 
     assert not controller._post_roll_timer.isActive()
-    controller._recorder.abort.assert_called_once()
-    controller._recorder.start.assert_called_once()
+    controller._recorder.abort.assert_called_once()  # type: ignore
+    controller._recorder.start.assert_called_once()  # type: ignore
 
 
 # ------------------------------------------------------------------
@@ -144,7 +144,7 @@ def test_on_recording_stopped_hides_indicator_immediately(
 
     controller._on_recording_stopped()
 
-    controller._indicator.hide.assert_called_once()
+    controller._indicator.hide.assert_called_once()  # type: ignore
     # Cleanup: stop timer so it doesn't fire after the test
     controller._post_roll_timer.stop()  # type: ignore[union-attr]
 
@@ -160,7 +160,7 @@ def test_on_recording_stopped_schedules_post_roll_timer(
 
     assert controller._post_roll_timer is not None
     assert controller._post_roll_timer.isActive()
-    controller._recorder.stop.assert_not_called()
+    controller._recorder.stop.assert_not_called()  # type: ignore
     # Cleanup
     controller._post_roll_timer.stop()
 
@@ -203,7 +203,7 @@ def test_finalize_recording_returns_early_on_no_audio(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
-    controller._recorder.stop.return_value = None
+    controller._recorder.stop.return_value = None  # type: ignore
     controller._pending_language = None
     mock_start = mocker.patch.object(controller, "_start_transcription")
 
@@ -216,7 +216,7 @@ def test_finalize_recording_starts_transcription_with_audio(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
-    controller._recorder.stop.return_value = "/tmp/aura_test.wav"
+    controller._recorder.stop.return_value = "/tmp/aura_test.wav"  # type: ignore
     controller._pending_language = "uk"
     controller._transcription_active = False
     mock_start = mocker.patch.object(controller, "_start_transcription")
@@ -230,7 +230,7 @@ def test_finalize_recording_discards_audio_when_transcription_running(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
-    controller._recorder.stop.return_value = "/tmp/aura_test.wav"
+    controller._recorder.stop.return_value = "/tmp/aura_test.wav"  # type: ignore
     controller._pending_language = None
     controller._transcription_active = True
 
@@ -246,7 +246,7 @@ def test_finalize_recording_discards_audio_when_transcription_running(
 
 
 def test_resolve_language_auto_calls_detector(controller: AppController, mocker) -> None:  # type: ignore[type-arg]
-    controller._tray.language = "auto"
+    controller._tray.language = "auto"  # type: ignore
     mock_detect = mocker.patch("aura.app.lang_detector.get_active_language", return_value="uk")
 
     result = controller._resolve_language()
@@ -259,7 +259,7 @@ def test_resolve_language_auto_returns_none_when_undetected(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
-    controller._tray.language = "auto"
+    controller._tray.language = "auto"  # type: ignore
     mocker.patch("aura.app.lang_detector.get_active_language", return_value=None)
 
     result = controller._resolve_language()
@@ -271,7 +271,7 @@ def test_resolve_language_explicit_bypasses_detector(
     controller: AppController,
     mocker,  # type: ignore[type-arg]
 ) -> None:
-    controller._tray.language = "uk"
+    controller._tray.language = "uk"  # type: ignore
     mock_detect = mocker.patch("aura.app.lang_detector.get_active_language")
 
     result = controller._resolve_language()
@@ -281,7 +281,7 @@ def test_resolve_language_explicit_bypasses_detector(
 
 
 def test_resolve_language_explicit_english(controller: AppController) -> None:
-    controller._tray.language = "en"
+    controller._tray.language = "en"  # type: ignore
     assert controller._resolve_language() == "en"
 
 
@@ -293,17 +293,17 @@ def test_resolve_language_explicit_english(controller: AppController) -> None:
 def test_on_transcription_done_pastes_text(controller: AppController) -> None:
     controller._on_transcription_done("dictated text")
 
-    controller._injector.paste.assert_called_once_with("dictated text")
+    controller._injector.paste.assert_called_once_with("dictated text")  # type: ignore
 
 
 def test_on_transcription_done_skips_empty_text(controller: AppController) -> None:
     controller._on_transcription_done("")
 
-    controller._injector.paste.assert_not_called()
+    controller._injector.paste.assert_not_called()  # type: ignore
 
 
 def test_on_transcription_done_handles_injector_exception(controller: AppController) -> None:
-    controller._injector.paste.side_effect = RuntimeError("clipboard locked")
+    controller._injector.paste.side_effect = RuntimeError("clipboard locked")  # type: ignore
 
     controller._on_transcription_done("some text")  # must not raise
 
@@ -347,7 +347,7 @@ def test_shutdown_stops_hotkey_listener(controller: AppController) -> None:
 
     controller.shutdown()
 
-    controller._hotkey.stop.assert_called_once()
+    controller._hotkey.stop.assert_called_once()  # type: ignore
 
 
 def test_shutdown_waits_for_running_thread(controller: AppController, mocker) -> None:  # type: ignore[type-arg]
@@ -374,4 +374,4 @@ def test_shutdown_cancels_active_post_roll_and_aborts_recorder(
     controller.shutdown()
 
     assert not controller._post_roll_timer.isActive()
-    controller._recorder.abort.assert_called_once()
+    controller._recorder.abort.assert_called_once()  # type: ignore
