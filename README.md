@@ -10,7 +10,7 @@ Aura is a lightweight Windows background app. It lives in the system tray and st
 
 1. Hold **Right Ctrl** — a small red dot appears at the top of the screen, recording starts.
 2. Release **Right Ctrl** — recording continues for 400 ms of trailing silence (post-roll), then stops.
-3. Aura sends the audio to **OpenAI Whisper** and receives the transcription. Language is auto-detected from your active keyboard layout or set manually via the tray menu.
+3. Aura sends the audio to **OpenAI Whisper** and receives the transcription. Language is auto-detected by Whisper from your speech, or can be set manually via the tray menu.
 4. The transcribed text is injected at the current cursor position in any application.
 
 No window, no UI, no distraction — just your words appearing as text.
@@ -21,7 +21,7 @@ No window, no UI, no distraction — just your words appearing as text.
 
 - **Push-to-talk hotkey** — Right Ctrl (configurable); no admin rights required
 - **Audio post-roll** — 400 ms of trailing silence after key release so Whisper never clips the last word
-- **Language auto-detection** — reads the active Windows keyboard layout via Win32 API; supports Ukrainian, English, Russian, German, French, Spanish, Italian, Polish and more
+- **Language auto-detection** — Whisper automatically detects the spoken language from the audio itself; supports dozens of languages
 - **Language override** — tray icon → Language submenu (Auto / UK / EN / RU)
 - **Recording indicator** — always-on-top frameless red dot, DPI-aware, disappears immediately on key release
 - **Modifier key release** — extended modifiers (Right Ctrl, Right Alt, Menu) are safely released before text injection so no ghost keys reach the target app
@@ -41,7 +41,7 @@ No window, no UI, no distraction — just your words appearing as text.
 | Audio capture | `sounddevice` + `soundfile` — WAV streaming to tempfile, no external DLLs |
 | Speech-to-text | OpenAI Whisper API (`whisper-1`) |
 | Text injection | `ctypes SendInput` (Unicode) + modifier release; clipboard fallback |
-| Language detection | Win32 `GetKeyboardLayout` via `ctypes` |
+| Language detection | Built-in OpenAI Whisper auto-detection |
 | Config | `python-dotenv` + `config.py` constants |
 | Package manager | `uv` |
 | Distribution | PyInstaller 6 — single portable `.exe` |
@@ -162,7 +162,6 @@ aura-app/
 │   ├── transcriber.py    # Transcriber: OpenAI Whisper API client
 │   ├── injector.py       # TextInjector: SendInput Unicode injection + modifier release
 │   ├── indicator.py      # RecordingIndicator: frameless always-on-top red dot
-│   ├── lang_detector.py  # Win32 GetKeyboardLayout → ISO 639-1 language code
 │   └── tray.py           # TrayIcon: QSystemTrayIcon + Language submenu + Exit
 ├── tests/                # 94 unit tests, 88.9% coverage
 ├── assets/
