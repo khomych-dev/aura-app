@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 # (language_code, display_label) — order defines the submenu order.
 _LANGUAGE_OPTIONS: list[tuple[str, str]] = [
-    ("auto", "Auto (System Layout)"),
+    ("auto", "Auto (Detect Spoken Language)"),
     ("uk", "Ukrainian"),
     ("en", "English"),
     ("ru", "Russian"),

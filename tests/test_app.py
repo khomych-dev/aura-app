@@ -245,39 +245,14 @@ def test_finalize_recording_discards_audio_when_transcription_running(
 # ------------------------------------------------------------------
 
 
-def test_resolve_language_auto_calls_detector(controller: AppController, mocker) -> None:  # type: ignore[type-arg]
+def test_resolve_language_auto_returns_none(controller: AppController) -> None:
     controller._tray.language = "auto"  # type: ignore
-    mock_detect = mocker.patch("aura.app.lang_detector.get_active_language", return_value="uk")
-
-    result = controller._resolve_language()
-
-    mock_detect.assert_called_once()
-    assert result == "uk"
+    assert controller._resolve_language() is None
 
 
-def test_resolve_language_auto_returns_none_when_undetected(
-    controller: AppController,
-    mocker,  # type: ignore[type-arg]
-) -> None:
-    controller._tray.language = "auto"  # type: ignore
-    mocker.patch("aura.app.lang_detector.get_active_language", return_value=None)
-
-    result = controller._resolve_language()
-
-    assert result is None
-
-
-def test_resolve_language_explicit_bypasses_detector(
-    controller: AppController,
-    mocker,  # type: ignore[type-arg]
-) -> None:
+def test_resolve_language_explicit_bypasses_auto(controller: AppController) -> None:
     controller._tray.language = "uk"  # type: ignore
-    mock_detect = mocker.patch("aura.app.lang_detector.get_active_language")
-
-    result = controller._resolve_language()
-
-    mock_detect.assert_not_called()
-    assert result == "uk"
+    assert controller._resolve_language() == "uk"
 
 
 def test_resolve_language_explicit_english(controller: AppController) -> None:
