@@ -4,7 +4,7 @@ import logging
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal, Slot
 
-from aura import config, lang_detector
+from aura import config
 from aura.hotkey import HotkeyListener
 from aura.indicator import RecordingIndicator
 from aura.injector import TextInjector
@@ -159,15 +159,13 @@ class AppController(QObject):
     def _resolve_language(self) -> str | None:
         """Return the ISO code to pass to Whisper, or ``None`` for auto-detect.
 
-        If the tray is set to ``'auto'``, the active window's keyboard layout
-        is probed via Win32 API.  An explicit tray selection bypasses detection.
+        If the tray is set to ``'auto'``, Whisper will auto-detect the spoken language.
+        An explicit tray selection forces Whisper to use that language.
         """
         selected = self._tray.language
         if selected == config.DEFAULT_LANGUAGE:  # "auto"
-            detected = lang_detector.get_active_language()
-            if detected:
-                logger.debug("Auto-detected language: %s", detected)
-            return detected
+            logger.debug("Using auto-detect (Spoken Language)")
+            return None
         logger.debug("Using manually selected language: %s", selected)
         return selected
 
