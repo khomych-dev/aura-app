@@ -7,6 +7,26 @@ from aura import config
 
 logger = logging.getLogger(__name__)
 
+if sys.platform == "win32":
+    import ctypes
+    import ctypes.wintypes
+
+    _user32_lang = ctypes.windll.user32  # type: ignore[attr-defined]
+
+    _user32_lang.GetForegroundWindow.restype = ctypes.wintypes.HWND
+    _user32_lang.GetForegroundWindow.argtypes = []
+
+    _user32_lang.GetWindowThreadProcessId.restype = ctypes.wintypes.DWORD
+    _user32_lang.GetWindowThreadProcessId.argtypes = [
+        ctypes.wintypes.HWND,
+        ctypes.POINTER(ctypes.wintypes.DWORD),
+    ]
+
+    _user32_lang.GetKeyboardLayout.restype = ctypes.c_void_p
+    _user32_lang.GetKeyboardLayout.argtypes = [ctypes.wintypes.DWORD]
+else:
+    _user32_lang = None  # type: ignore[assignment]
+
 
 def get_active_language() -> str | None:
     """Return the ISO 639-1 code for the active window's current keyboard layout.
@@ -25,37 +45,20 @@ def get_active_language() -> str | None:
         return None
 
     try:
-        import ctypes.wintypes
-
-        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
-
-        # 1. Declare exact types to prevent 64-bit pointer truncation
-        user32.GetForegroundWindow.restype = ctypes.wintypes.HWND
-        user32.GetForegroundWindow.argtypes = []
-
-        user32.GetWindowThreadProcessId.restype = ctypes.wintypes.DWORD
-        user32.GetWindowThreadProcessId.argtypes = [
-            ctypes.wintypes.HWND,
-            ctypes.POINTER(ctypes.wintypes.DWORD),
-        ]
-
-        user32.GetKeyboardLayout.restype = ctypes.c_void_p
-        user32.GetKeyboardLayout.argtypes = [ctypes.wintypes.DWORD]
-
         # 2. Get active window
-        hwnd = user32.GetForegroundWindow()
+        hwnd = _user32_lang.GetForegroundWindow()
         if not hwnd:
             logger.debug("GetForegroundWindow returned NULL — no active window")
             return None
 
         # 3. Get thread ID of that window
-        thread_id = user32.GetWindowThreadProcessId(hwnd, None)
+        thread_id = _user32_lang.GetWindowThreadProcessId(hwnd, None)
         if not thread_id:
             logger.debug("Failed to get thread ID for HWND")
             return None
 
         # 4. Get keyboard layout for that thread
-        hkl = user32.GetKeyboardLayout(thread_id)
+        hkl = _user32_lang.GetKeyboardLayout(thread_id)
 
         # Lower 16 bits of HKL encode the primary LANGID.
         langid: int = (hkl if hkl is not None else 0) & 0xFFFF

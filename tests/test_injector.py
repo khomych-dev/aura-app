@@ -10,23 +10,20 @@ from aura.injector import TextInjector
 
 @pytest.fixture()
 def injector() -> TextInjector:
-    return TextInjector()
+    with patch("aura.injector.threading.Thread"):
+        return TextInjector()
 
 
 def test_paste_empty_string_is_noop(injector: TextInjector) -> None:
-    with patch("aura.injector.threading.Thread") as mock_thread:
-        injector.paste("")
-    mock_thread.assert_not_called()
+    injector.paste("")
+    assert injector._queue.empty()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Requires Windows")
-def test_paste_starts_worker_thread(injector: TextInjector) -> None:
-    with patch("aura.injector.threading.Thread") as mock_thread:
-        injector.paste("hello world")
-    mock_thread.assert_called_once()
-    args, kwargs = mock_thread.call_args
-    assert kwargs.get("target") == injector._paste_worker
-    assert kwargs.get("args") == ("hello world",)
+def test_paste_puts_text_in_queue(injector: TextInjector) -> None:
+    injector.paste("hello world")
+    assert not injector._queue.empty()
+    assert injector._queue.get_nowait() == "hello world"
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Requires Windows")

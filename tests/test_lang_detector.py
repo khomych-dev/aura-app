@@ -15,14 +15,14 @@ def test_returns_none_on_non_win32() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires Windows")
 def test_returns_none_when_no_foreground_window() -> None:
-    with patch("ctypes.windll.user32") as mock_user32:
+    with patch("aura.lang_detector._user32_lang") as mock_user32:
         mock_user32.GetForegroundWindow.return_value = 0
         assert get_active_language() is None
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires Windows")
 def test_returns_mapped_language_ukrainian() -> None:
-    with patch("ctypes.windll.user32") as mock_user32:
+    with patch("aura.lang_detector._user32_lang") as mock_user32:
         mock_user32.GetForegroundWindow.return_value = 12345
         mock_user32.GetWindowThreadProcessId.return_value = 67890
         mock_user32.GetKeyboardLayout.return_value = 0x0422
@@ -31,7 +31,7 @@ def test_returns_mapped_language_ukrainian() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires Windows")
 def test_returns_mapped_language_english() -> None:
-    with patch("ctypes.windll.user32") as mock_user32:
+    with patch("aura.lang_detector._user32_lang") as mock_user32:
         mock_user32.GetForegroundWindow.return_value = 12345
         mock_user32.GetWindowThreadProcessId.return_value = 67890
         mock_user32.GetKeyboardLayout.return_value = 0x0409
@@ -40,7 +40,7 @@ def test_returns_mapped_language_english() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires Windows")
 def test_returns_none_for_unmapped_langid() -> None:
-    with patch("ctypes.windll.user32") as mock_user32:
+    with patch("aura.lang_detector._user32_lang") as mock_user32:
         mock_user32.GetForegroundWindow.return_value = 12345
         mock_user32.GetWindowThreadProcessId.return_value = 67890
         mock_user32.GetKeyboardLayout.return_value = 0x9999  # Unmapped
@@ -49,6 +49,6 @@ def test_returns_none_for_unmapped_langid() -> None:
 
 @pytest.mark.skipif(sys.platform != "win32", reason="requires Windows")
 def test_returns_none_on_win32_exception() -> None:
-    with patch("ctypes.windll.user32") as mock_user32:
+    with patch("aura.lang_detector._user32_lang") as mock_user32:
         mock_user32.GetForegroundWindow.side_effect = Exception("Win32 error")
         assert get_active_language() is None
